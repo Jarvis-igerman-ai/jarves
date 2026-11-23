@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -124,11 +125,11 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
         return wt
     wt.parent.mkdir(parents=True, exist_ok=True)
     start = base or "HEAD"
-    with _repo_lock(repo):
+    with _jarves_writes(), _repo_lock(repo):
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
             git(repo, "worktree", "add", str(wt), br)
         else:
-            git(repo, "worktree", "add", "-b", br, str(wt), start)
+            git(repo, "worktree", "add", "--no-track", "-b", br, str(wt), start)
     return wt
 
 
@@ -136,17 +137,17 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
-    with _repo_lock(repo):
+    with _jarves_writes(), _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        git(repo, "worktree", "add", "--no-track", "-b", br, str(wt), integration_branch(pid))
     return wt, br
 
 
 def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     """A throw-away worktree at one exact commit (a release runs there, never in your folder)."""
     wt = project_root(home, pid) / "release" / sha[:12]
-    with _repo_lock(repo):
+    with _jarves_writes(), _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "--detach", str(wt), sha)
@@ -157,7 +158,7 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     """Only ever called for paths under <home>/projects (callers build them); a missing one is fine."""
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
-    with _repo_lock(repo):
+    with _jarves_writes(), _repo_lock(repo):
         git(repo, "worktree", "remove", "--force", str(wt), check=False)
         if Path(wt).exists():
             shutil.rmtree(wt, ignore_errors=True)
@@ -253,92 +254,150 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
 
 
 # #1592: a check command (run by JARVES, or by the agent through its `Bash(<check>:*)` rule) executes worktree code
-# as the owner's user, and that code can write the SHARED git config (a `filter.<n>.clean` entry runs on the owner's
-# next `git add`). No permission rule stops executed code, so each such run is wrapped in `config_guard`: the shared
-# `<common>/config` and the worktree's `.git` pointer are read when the run starts and, if either changed when it
-# ends, put back (the rejected text is kept in `<file>.jarves-rejected`) and the run fails. Overlapping runs on one
-# repository share the snapshot taken by the first, so a later run never adopts an entry an earlier run planted.
-# Limits: only these two files (not ~/.gitconfig or include targets); a change undone before the run ends is not seen.
+# as the owner's user. That code can plant something the owner's own git later runs: a `filter.<n>.clean` entry in the
+# shared config, a hook in `<common>/hooks/`, a `config.worktree` or an `info/attributes` file. No permission rule stops
+# executed code, so each such run is wrapped in `config_guard`: the guarded files (GUARDED_FILES below, the worktree's
+# `.git` pointer and every file in `<common>/hooks/`) are read when the run starts. If any changed when it ends, it is
+# put back, the rejected text is kept in `<common>/jarves-rejected/`, and the run fails. Overlapping runs on one
+# repository share the snapshot taken by the first, so a later run never takes a planted entry as its baseline.
+# On Linux the run is contained (`contain`): every process it started, a detached one included, is killed before the
+# guard compares, so nothing can write after the run ends. NOT on Windows or macOS (UNVERIFIED there, tracked in
+# #1665): a detached descendant can still write after the run, which is not seen. Also not guarded: ~/.gitconfig and
+# config include targets; a change undone before the run ends is not seen. Any change during a run is reverted, the
+# owner's own `git config` in that repository included (the text is kept); JARVES's own worktree calls write no config
+# (`--no-track`) and re-take the snapshot (`_jarves_writes`).
+GUARDED_FILES = ("config", "config.worktree", "info/attributes")
 _GUARDS: dict[str, dict] = {}
-_GUARDS_LOCK = threading.Lock()
+_GUARDS_LOCK = threading.RLock()
 TAMPERED = "changed the shared git config; the change was undone"
+_REAPER = str(Path(__file__).with_name("_reaper.py"))
 
 
-def guarded_files(wt: str | Path) -> list[Path]:
-    """The worktree's `.git` pointer (when it is a file) and the shared config it leads to, read from disk without
-    running git. Raises GitError/OSError when `wt` is not a git worktree: the caller refuses the run."""
+def guarded_files(wt: str | Path) -> list[tuple[str, str, str]]:
+    """(path, kind, rejected-dir) for every guarded file or folder of the worktree, found on disk without running git.
+    Raises GitError/OSError when `wt` is not a git worktree: the caller refuses the run."""
     dot = Path(wt) / ".git"
-    files = [dot / "config"]
+    gd, out = dot, []
     if not dot.is_dir():
         text = dot.read_text(encoding="utf-8").strip()
         if not text.startswith("gitdir:"):
             raise GitError(f"{dot} is not a git pointer")
         gd = Path(wt) / text[7:].strip()                 # an absolute gitdir replaces the worktree part
-        common = gd / (gd / "commondir").read_text(encoding="utf-8").strip() if (gd / "commondir").is_file() else gd
-        files = [dot, common / "config"]
-    if not files[-1].is_file():
+        out.append((dot, "file"))
+    common = gd / (gd / "commondir").read_text(encoding="utf-8").strip() if (gd / "commondir").is_file() else gd
+    if not (common / "config").is_file():
         raise GitError(f"no shared git config found for {wt}")
-    return files
+    out += [(common / n, "file") for n in GUARDED_FILES] + [(gd / "config.worktree", "file"), (common / "hooks", "dir")]
+    rej = os.path.join(os.path.realpath(common), "jarves-rejected")
+    seen: dict[str, tuple[str, str, str]] = {}
+    for path, kind in out:                               # the real file: a symlinked config stays linked
+        seen.setdefault(os.path.realpath(path), (os.path.realpath(path), kind, rej))
+    return list(seen.values())
 
 
-def _read(path: str) -> bytes | None:
+def _read(path: str):
     try:
         with open(path, "rb") as f:
-            return f.read()
+            return f.read(), os.stat(path).st_mode & 0o7777
     except FileNotFoundError:
         return None
 
 
-def _restore(path: str, data: bytes | None, now: bytes | None) -> None:
-    """Put `data` back at `path` atomically (unique temp file + os.replace), then keep the rejected text beside it."""
+def _snap(path: str, kind: str):
+    if kind == "file":
+        return _read(path)
+    try:
+        names = sorted(e.name for e in os.scandir(path) if e.is_file())
+    except FileNotFoundError:
+        return {}
+    return {n: _read(os.path.join(path, n)) for n in names}
+
+
+def _reject(rej: str, path: str, now) -> None:
+    """Keep the rejected text for the owner: one new file per incident, never overwritten."""
+    os.makedirs(rej, exist_ok=True)
+    fd, _ = tempfile.mkstemp(prefix=time.strftime("%Y%m%d-%H%M%S-") + os.path.basename(path) + "-", dir=rej)
+    with os.fdopen(fd, "wb") as f:
+        f.write(now[0])
+
+
+def _put(path: str, data) -> None:
+    """Put `data` (bytes, mode) back at `path` atomically (unique temp file + os.replace); None removes the file."""
     if data is None:
         os.remove(path)
-    else:
-        fd, tmp = tempfile.mkstemp(prefix=".jarves-", dir=os.path.dirname(path))
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
-            os.replace(tmp, path)
-        except OSError:
-            os.unlink(tmp)
-            raise
-    if now is not None:
-        with open(path + ".jarves-rejected", "wb") as f:
-            f.write(now)
+        return
+    fd, tmp = tempfile.mkstemp(prefix=".jarves-", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data[0])
+        os.chmod(tmp, data[1])
+        os.replace(tmp, path)
+    except OSError:
+        os.unlink(tmp)
+        raise
+
+
+def _restore(path: str, kind: str, rej: str, data, now) -> None:
+    pairs = [(path, data, now)] if kind == "file" else [
+        (os.path.join(path, n), data.get(n), now.get(n)) for n in sorted(set(data) | set(now))]
+    for p, want, have in pairs:
+        if want != have:
+            if have is not None:
+                _reject(rej, p, have)
+            _put(p, want)
 
 
 @contextmanager
-def config_guard(files: list[Path]):
+def config_guard(files: list[tuple[str, str, str]]):
     """Guards `guarded_files(wt)`. Yields a dict whose "tampered" turns True when one of them changed during the run
     (see #1592 above); "error" says why a changed file could not be put back."""
-    keys = [os.path.realpath(str(p)) for p in files]   # the real file: a symlinked config stays linked
     mark: dict = {"tampered": False}
     with _GUARDS_LOCK:
-        for k in keys:
-            g = _GUARDS.setdefault(k, {"data": _read(k), "marks": []})
-            g["marks"].append(mark)
+        for path, kind, rej in files:
+            _GUARDS.setdefault(path, {"kind": kind, "rej": rej, "data": _snap(path, kind), "marks": []})["marks"].append(mark)
     try:
         yield mark
     finally:
         with _GUARDS_LOCK:
-            for k in keys:
-                g = _GUARDS[k]
+            for path, _kind, _rej in files:
+                g = _GUARDS[path]
                 try:
-                    now = _read(k)
+                    now = _snap(path, g["kind"])
                     if now != g["data"]:
                         for m in g["marks"]:             # every run active on this file is suspect, not only this one
                             m["tampered"] = True
-                        _restore(k, g["data"], now)
+                        _restore(path, g["kind"], g["rej"], g["data"], now)
                 except OSError as e:                     # e.g. the file was replaced by a folder: still a failure
-                    mark.update(tampered=True, error=f"{k} could not be restored: {e}")
+                    mark.update(tampered=True, error=f"{path} could not be restored: {e}")
                 g["marks"].remove(mark)
                 if not g["marks"]:
-                    del _GUARDS[k]
+                    del _GUARDS[path]
+
+
+@contextmanager
+def _jarves_writes():
+    """JARVES's own worktree calls: an unchanged guarded file takes its new content as the snapshot (R3 of #1592)."""
+    with _GUARDS_LOCK:
+        before = {k: _snap(k, g["kind"]) for k, g in _GUARDS.items()}
+        try:
+            yield
+        finally:
+            for k, g in _GUARDS.items():
+                if before.get(k) == g["data"]:
+                    g["data"] = _snap(k, g["kind"])
+
+
+def contain(argv: list[str], timeout: float = 0) -> tuple[list[str], bool]:
+    """On Linux: argv run under `_reaper.py`, a child subreaper that kills every process the run left behind (a
+    detached one too) before it exits; exit 124 = it hit `timeout`. Elsewhere argv is unchanged (see #1592 above)."""
+    if not sys.platform.startswith("linux"):
+        return list(argv), False
+    return [sys.executable, "-I", _REAPER, str(float(timeout)), *argv], True
 
 
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
     """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree,
-    inside `config_guard` (#1592). env_keep: extra variable names the owner allowed for this command."""
+    inside `config_guard` and `contain` (#1592). env_keep: extra variable names the owner allowed for this command."""
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
@@ -346,15 +405,21 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
         files = guarded_files(wt)
     except (GitError, OSError) as e:
         return False, f"check refused: the shared git config cannot be guarded ({e})"
+    cmd, contained = contain(argv, timeout)
+    timed_out = False
     try:
         with config_guard(files) as guard:
-            p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout,
-                               creationflags=_NOWIN, env=child_env(extra), encoding="utf-8", errors="replace",
-                               stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        return False, "check timed out" + (f"; it {TAMPERED}" if guard["tampered"] else "")
+            try:
+                p = subprocess.run(cmd, cwd=str(wt), capture_output=True, text=True,
+                                   timeout=timeout + 30 if contained else timeout, creationflags=_NOWIN,
+                                   env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+                timed_out = contained and p.returncode == 124
+            except subprocess.TimeoutExpired:
+                timed_out = True
     except OSError as e:
         return False, f"check could not start: {e}"
+    if timed_out:
+        return False, "check timed out" + (f"; it {TAMPERED} {guard.get('error', '')}".rstrip() if guard["tampered"] else "")
     if guard["tampered"]:
         return False, f"check {TAMPERED} {guard.get('error', '')}".strip()
     out = ((p.stdout or "") + (p.stderr or "")).strip()

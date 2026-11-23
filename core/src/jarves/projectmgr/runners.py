@@ -110,15 +110,17 @@ class Runner:
             files = gitops.guarded_files(cwd)
         except (gitops.GitError, OSError) as e:
             return Result(error=f"refused: the shared git config cannot be guarded ({e})")
-        with gitops.config_guard(files) as guard:
-            r = self._spawn(spec, cwd, timeout, on_start, cancel)
+        with gitops.config_guard(files) as guard:       # contained on Linux: no process outlives the comparison
+            r = self._spawn(spec, cwd, timeout, on_start, cancel, contained=True)
         if guard["tampered"]:
             r.ok, r.error = False, f"{self.name} run {gitops.TAMPERED} {guard.get('error', '')}".strip()
         return r
 
-    def _spawn(self, spec: Spec, cwd: str, timeout: float, on_start, cancel: threading.Event | None) -> Result:
+    def _spawn(self, spec: Spec, cwd: str, timeout: float, on_start, cancel: threading.Event | None,
+               contained: bool = False) -> Result:
+        argv, contained = gitops.contain(spec.argv) if contained else (spec.argv, False)
         try:
-            p = subprocess.Popen(spec.argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
+            p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
                                  creationflags=_NOWIN, encoding="utf-8", errors="replace",
                                  start_new_session=(os.name != "nt"))
@@ -138,17 +140,28 @@ class Runner:
         while t.is_alive():
             t.join(0.2)
             if cancel is not None and cancel.is_set():
-                kill_tree(p)
+                _stop(p, contained)
                 t.join(5)
                 return Result(error="cancelled")
         if box.get("timeout"):
-            kill_tree(p)
+            _stop(p, contained)
             return Result(error=f"timed out after {int(timeout)} s", timed_out=True)
         out = (box.get("out") or "")[-OUT_CAP:]
         r = self.parse(out, p.returncode)
         if not r.ok and not r.error:
             r.error = (box.get("err") or "").strip()[-300:] or f"{self.name} exited with {p.returncode}"
         return r
+
+
+def _stop(p: subprocess.Popen, contained: bool) -> None:
+    """A contained run first gets SIGTERM, so its reaper kills every process it started (a detached one too)."""
+    if contained:
+        p.terminate()
+        try:
+            p.wait(10)
+        except subprocess.TimeoutExpired:
+            pass
+    kill_tree(p)
 
 
 def kill_tree(p: subprocess.Popen) -> None:

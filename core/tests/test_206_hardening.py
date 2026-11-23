@@ -205,13 +205,16 @@ def test_h4_guide_claim_check_runs_with_an_allow_listed_env_and_a_time_limit(tmp
     seen = {}
 
     def fake_run(argv, **kw):
-        seen.update(kw)
+        seen.update(kw, argv=argv)
         raise subprocess.TimeoutExpired(argv, kw["timeout"])
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     (tmp_path / ".git").mkdir()                       # #1592: a check runs only where the shared config can be guarded
     (tmp_path / ".git" / "config").write_text("", encoding="utf-8")
     monkeypatch.setattr(gitops.subprocess, "run", fake_run)
     assert gitops.run_check(tmp_path, ["check"], timeout=7) == (False, "check timed out")
-    assert seen["timeout"] == 7 and "OPENAI_API_KEY" not in seen["env"] and seen.get("shell") is not True
+    # #1592: on Linux the reaper enforces the limit (its first argument) and the parent waits 30 s longer
+    contained = seen["argv"] != ["check"]
+    assert (seen["timeout"], seen["argv"][3:]) == ((37, ["7.0", "check"]) if contained else (7, []))
+    assert "OPENAI_API_KEY" not in seen["env"] and seen.get("shell") is not True
     assert seen["env"] and all(k.upper() in gitops.ENV_KEEP for k in seen["env"])     # only allow-listed names
 
