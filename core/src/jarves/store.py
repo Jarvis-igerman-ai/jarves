@@ -505,10 +505,12 @@ class Store:
             self._db.commit()
         return n > 0
 
-    def tool_stats(self, days: int = 30) -> dict[str, dict]:
+    def tool_stats(self, days: int = 30, now: float | None = None) -> dict[str, dict]:
+        """Per tool over the `days` before `now` (default: the wall clock)."""
         out = {}
         for r in self.rows("SELECT name, COUNT(*) n, SUM(ok = 0) fails, AVG(duration_s) avg_s, MAX(ts) last "
-                           "FROM tool_calls WHERE ts > ? GROUP BY name", (time.time() - days * 86400,)):
+                           "FROM tool_calls WHERE ts > ? GROUP BY name",
+                           ((time.time() if now is None else now) - days * 86400,)):
             out[r["name"]] = r
         return out
 
