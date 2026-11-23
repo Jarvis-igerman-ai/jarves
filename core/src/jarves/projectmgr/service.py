@@ -236,7 +236,11 @@ class Manager(StageEngine):
                 return _res(False, "AMBIGUOUS", "which one? " + "; ".join(hits[:5]), candidates=hits[:8])
             path = hits[0]
         root = Path(path).expanduser().resolve()
-        if not root.is_dir() or not gitops.is_repo(str(root)):
+        try:
+            repo_ok = root.is_dir() and gitops.is_repo(str(root))
+        except gitops.GitError as e:                     # review R3: the repo config needs a change, say which
+            return _res(False, "GIT_CONFIG", f"cannot manage {root}: {e}")
+        if not repo_ok:
             return _res(False, "NOT_GIT", f"not a git repository: {root}")
         name = (name or folder or root.name).strip()
         if not NAME_RE.match(name):
@@ -924,8 +928,11 @@ class Manager(StageEngine):
                                              "(no push)", "project_ship",
                                              {"project": p["name"], "branch": st["branch"], "commit": sha}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,     # your own git identity / signing
-                                        message=f"Merge branch '{br}' at commit {sha[:12]}")
+            try:
+                conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,     # your own git identity / signing
+                                            message=f"Merge branch '{br}' at commit {sha[:12]}")
+            except (OSError, gitops.GitError) as e:         # review R4: git() raises GitError even with check=False
+                return _res(False, "GIT_ERROR", f"git failed, nothing merged: {e}")
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration commit merged into the owner branch", id=p["id"])

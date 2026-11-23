@@ -632,6 +632,30 @@ def test_ship_without_an_integration_branch_says_nothing_to_ship(env):
         assert r["code"] == "NOTHING_TO_SHIP" and "nothing to ship" in r["text"], r
 
 
+def test_open_shows_why_the_repository_config_cannot_be_used(env):
+    """PR #1657 review R3: a config JARVES cannot neutralise (a required repository filter) shows its guidance on
+    open, not 'not a git repository'."""
+    m, repo, _ = env
+    sh(repo, "git", "config", "filter.big.clean", "big clean")
+    sh(repo, "git", "config", "filter.big.required", "true")
+    r = m.call("open", path=str(repo), name="demo")
+    assert r["code"] == "GIT_CONFIG" and "global config" in r["text"], r
+
+
+def test_ship_apply_reports_a_failing_merge_as_git_error(env, monkeypatch):
+    """PR #1657 review R4: git() raises GitError even with check=False (config read); ship says GIT_ERROR."""
+    from jarves.projectmgr import gitops
+    m, repo, _ = env
+    open_project(m, repo)
+    m._ask = lambda *a, **k: True
+
+    def boom(*a, **k):
+        raise gitops.GitError("cannot read the git config")
+    monkeypatch.setattr(gitops, "merge_in", boom)
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["code"] == "GIT_ERROR" and "nothing merged" in r["text"], r
+
+
 def test_ship_reports_a_git_failure_and_merges_nothing(env, monkeypatch):
     """#1407 review R5: when the commit cannot be read (git or the config read fails) ship says GIT_ERROR and
     nothing merges."""

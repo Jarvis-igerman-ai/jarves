@@ -317,7 +317,8 @@ def test_an_unreadable_config_fails_closed(monkeypatch, tmp_path):
     with pytest.raises(gitops.GitError, match="2.26"):
         gitops.git(tmp_path, "merge", "x")
     assert calls == [["git", "config", "--show-scope", "-z", "--list"]]
-    assert gitops.is_repo(str(tmp_path)) is False
+    with pytest.raises(gitops.GitError, match="2.26"):           # review R3: the reason reaches the caller
+        gitops.is_repo(str(tmp_path))
 
 
 @pytest.mark.parametrize("section", [b'[filter "\xff"]\n\tclean = x\n', b'[merge "\xfe"]\n\tdriver = x\n'])
@@ -379,6 +380,8 @@ def test_diff_drivers_named_in_the_repository_config_never_run(tmp_path):
     gitops.diffstat(repo, "HEAD~1")
     gitops.git(repo, "diff", "HEAD~1", "HEAD", check=False)
     assert gitops.changed_files(repo, "HEAD~1") == ["f.txt"]
+    for cmd in (("show", "HEAD"), ("log", "-p", "-1"), ("format-patch", "-1", "--stdout"), ("blame", "f.txt")):
+        assert gitops.git(repo, *cmd).returncode == 0, cmd      # PR #1657 review R1: textconv is on by default there
     assert not marker.exists()
 
 
@@ -395,6 +398,21 @@ def test_a_required_repository_filter_explains_the_failure(tmp_path):
     assert "x.bin" not in subprocess.run(["git", "ls-files"], cwd=repo, capture_output=True, text=True).stdout
     subprocess.run(["git", "config", "--unset", "filter.big.required"], cwd=repo, check=True)
     gitops.git(repo, "status")                                     # not required: skipped, as before
+
+
+@pytest.mark.parametrize("line,required", [("\trequired\n", True), ("\trequired = 2\n", True),
+                                           ("\trequired = 1k\n", True), ("\trequired = 0\n", False),
+                                           ("\trequired = off\n", False), ("\trequired =\n", False)])
+def test_required_filter_follows_git_boolean_rules(tmp_path, line, required):
+    """PR #1657 review R2: a value-less `required` and any non-zero integer are true for git, so they fail closed."""
+    repo = _repo(tmp_path)
+    with open(repo / ".git" / "config", "a", encoding="utf-8") as f:
+        f.write('[filter "big"]\n\tclean = big clean\n' + line)
+    if required:
+        with pytest.raises(gitops.GitError, match="marked required"):
+            gitops.git(repo, "status")
+    else:
+        gitops.git(repo, "status")
 
 
 def test_the_ship_merge_message_names_the_branch_and_commit(tmp_path):

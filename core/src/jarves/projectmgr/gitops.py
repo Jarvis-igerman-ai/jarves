@@ -77,6 +77,20 @@ _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.pr
                 "gpg.ssh.program": "ssh-keygen", "gpg.format": "openpgp", "user.signingkey": ""}
 _SIGN_CHOICE = ("gpg.format", "user.signingkey")       # no command, but they choose how the owner's commit is signed
 _OPENPGP = ("gpg.program", "gpg.openpgp.program")      # git treats these as one setting: the last one read wins
+# Commands that run textconv / external diff commands by default (#1407 review R1), and the flags that stop them.
+_NO_DIFF_CMDS = {"diff": ("--no-ext-diff", "--no-textconv"), "show": ("--no-ext-diff", "--no-textconv"),
+                 "log": ("--no-ext-diff", "--no-textconv"), "whatchanged": ("--no-ext-diff", "--no-textconv"),
+                 "format-patch": ("--no-ext-diff", "--no-textconv"), "blame": ("--no-textconv",),
+                 "annotate": ("--no-textconv",)}
+
+
+def _git_true(value: str, has_value: bool) -> bool:
+    """git's boolean rule for a config value (review R2): a key with no `=` is true; false/no/off, empty and integer
+    zero are false. Anything else counts as true, so an unreadable value fails closed."""
+    if not has_value:
+        return True
+    v = value.strip().lower()
+    return not (v in ("false", "no", "off", "") or re.fullmatch(r"[+-]?0+[kmg]?", v))
 
 
 def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
@@ -98,12 +112,16 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
     if p.returncode != 0:
         raise GitError("cannot read the git config (git 2.26 or newer is needed): " + (p.stderr or "").strip()[:200])
     items = p.stdout.split("\0")
-    entries = [(items[i], *(items[i + 1].split("\n", 1) + [""])[:2]) for i in range(0, len(items) - 1, 2)]
+    entries, has = [], {}
+    for i in range(0, len(items) - 1, 2):            # a value-less key (`[filter "x"] required`) has no newline
+        key, nl, val = items[i + 1].partition("\n")
+        entries.append((items[i], key, val))
+        has[i // 2] = bool(nl)
     owner = {k.lower(): v for scope, k, v in entries if scope in ("global", "system")}
     pgp = [v for scope, k, v in entries if scope in ("global", "system") and k.lower() in _OPENPGP]
     owner.update(dict.fromkeys(_OPENPGP, pgp[-1] if pgp else "gpg"))     # your effective OpenPGP program, either alias
-    required = {k.lower()[7:-9] for _s, k, v in entries if re.fullmatch(r"filter\..+\.required", k, re.I | re.S)
-                and v.strip().lower() in ("true", "yes", "on", "1")}
+    required = {k.lower()[7:-9] for n, (_s, k, v) in enumerate(entries)
+                if re.fullmatch(r"filter\..+\.required", k, re.I | re.S) and _git_true(v, has[n])}
     out: list[str] = []
     for scope, key, _v in entries:
         m = _RUN_KEY.fullmatch(key)
@@ -132,12 +150,16 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Commands named in the repository's own config are neutralised too (#1407,
-    see `_config_overrides`). Every `diff` runs with `--no-ext-diff --no-textconv`: `diff.external`,
-    `diff.<x>.command` and `diff.<x>.textconv` (with an agent-written `info/attributes`) name commands too."""
+    see `_config_overrides`). `diff`, `show`, `log`, `whatchanged` and `format-patch` run with `--no-ext-diff
+    --no-textconv`, `blame`/`annotate` with `--no-textconv`: `diff.external`, `diff.<x>.command` and
+    `diff.<x>.textconv` (with an agent-written `info/attributes`) name commands too. Other subcommands never get
+    these flags, so a new caller of another diff-producing command must add them.
+    Raises GitError whatever `check` says when the repository config cannot be read or neutralised (fail closed:
+    then no git runs); `check=False` only covers git's own exit status."""
     over = _config_overrides(cwd, ident)
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *over]
-    if args[:1] == ("diff",):
-        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
+    if args and args[0] in _NO_DIFF_CMDS:
+        args = (args[0], *_NO_DIFF_CMDS[args[0]], *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -151,9 +173,11 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 
 
 def is_repo(path: str) -> bool:
+    """True for a git work tree. A repository config JARVES cannot neutralise raises GitError (review R3), so the
+    caller shows its guidance instead of 'not a git repository'."""
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError, GitError):
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
