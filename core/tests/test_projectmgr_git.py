@@ -24,8 +24,10 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
-        if "--show-scope" in argv or "--git-common-dir" in argv:      # the #1390 config read: nothing names a command
+        if "--show-scope" in argv or "ls-files" in argv:              # the #1390 config read: nothing names a command
             return subprocess.CompletedProcess(argv, 0, b"", b"")
+        if "--show-toplevel" in argv:                                  # the #1390 gitlink scan: the test's own folder
+            return subprocess.CompletedProcess(argv, 0, str(kw["cwd"]).encode(), b"")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -256,4 +258,5 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
     for argv in calls:
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
+        assert {"submodule.recurse=false", "fetch.recurseSubmodules=false", "push.recurseSubmodules=no"} <= set(pairs)
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")

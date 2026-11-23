@@ -116,36 +116,49 @@ def _pairs(out: bytes) -> list[tuple[str, str]]:
             for kv in out.decode("utf-8", "replace").split("\0") if kv]
 
 
-def _module_configs(cwd: str | Path) -> list[Path]:
-    """Config files of every submodule (nested ones too) in the shared `<common dir>/modules` (#1390 review R1):
-    `git status`, a checkout or a merge runs git inside a populated submodule with that submodule's own config."""
-    p = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(cwd),
-                       capture_output=True, creationflags=_NOWIN, env=child_env(), timeout=30)
-    root = Path(os.fsdecode(p.stdout.strip())) / "modules" if p.returncode == 0 else None
-    found: list[Path] = []
-    for d, subdirs, files in os.walk(root) if root and root.is_dir() else ():
-        subdirs[:] = [x for x in subdirs if x not in ("objects", "refs", "logs", "lfs")]     # no config below these
-        found += [Path(d) / f for f in files if f in ("config", "config.worktree")]
-    return sorted(found)
+def _populated_gitlinks(cwd: str | Path) -> tuple[Path, list[Path]] | str:
+    """(work tree root, folders of its populated gitlinks) or a refusal text (#1390, #1662 R1-R3). `git status` and
+    `git diff` run git inside every gitlink of the index that has a `.git` (a folder or a `gitdir:` file pointing
+    anywhere, e.g. `.git/modules/x` or `.git/worktrees/w/modules/x`), with that repository's own config."""
+    env = child_env({"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"})
+    top = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--show-toplevel"], cwd=str(cwd),
+                         capture_output=True, creationflags=_NOWIN, env=env, timeout=30)
+    err = top.stderr.decode("utf-8", "replace").strip()
+    if top.returncode != 0:                  # not a repository at all (e.g. before `git init`): nothing to recurse into
+        return (Path(cwd), []) if "not a git repository" in err else f"(unreadable config: gitlinks: {err[:150]})"
+    root = Path(os.fsdecode(top.stdout.strip()))
+    ls = subprocess.run(["git", "-c", "core.fsmonitor=false", "ls-files", "--stage", "-z"], cwd=str(root),
+                        capture_output=True, creationflags=_NOWIN, env=env, timeout=60)
+    if ls.returncode != 0:
+        return f"(unreadable config: gitlinks: {ls.stderr.decode('utf-8', 'replace').strip()[:150]})"
+    paths = [root / os.fsdecode(e.split(b"\t", 1)[1]) for e in ls.stdout.split(b"\0") if e.startswith(b"160000 ")]
+    return root, [x for x in paths if os.path.lexists(x / ".git")]
 
 
-def config_commands(cwd: str | Path) -> list[str]:
-    """Keys in the repository's own config, and in each submodule's config, that name a command (#1390). Both sit
-    in the shared `.git` folder every agent can write; the owner's global/system config is not checked. A config
-    git cannot read is refused too (fail closed)."""
+def config_commands(cwd: str | Path, _prefix: str = "", _depth: int = 0) -> list[str]:
+    """Keys that name a command (#1390) in the repository's own config and, recursively, in the config of every
+    populated gitlink (submodule or nested repository) git would enter; a nested key reads `lib:filter.x.clean`.
+    These sit in the shared `.git` folder or in a work tree, both writable by agents; the owner's global/system config
+    is not checked. A config or gitlink list git cannot read is refused too (fail closed)."""
     p = _read_config(cwd, "--show-scope")
     if p.returncode != 0:
-        return [f"(unreadable config: {p.stderr.decode('utf-8', 'replace').strip()[:150]})"]
+        return [f"(unreadable config: {_prefix}{p.stderr.decode('utf-8', 'replace').strip()[:150]})"]
     parts = p.stdout.decode("utf-8", "replace").split("\0")
     own = b"\0".join(kv.encode() for scope, kv in zip(parts[::2], parts[1::2]) if scope in _SHARED_SCOPES)
-    bad = {k for k, v in _pairs(own) if _names_command(k, v)}
-    for f in _module_configs(cwd):
-        name = f.parent.as_posix().split("/modules/", 1)[-1]
-        q = _read_config(f.parent, "--file", str(f), "--includes")
-        if q.returncode != 0:
-            bad.add(f"(unreadable config: modules/{name})")
-        bad |= {f"modules/{name}:{k}" for k, v in _pairs(q.stdout) if _names_command(k, v)}
+    bad = {_prefix + k for k, v in _pairs(own) if _names_command(k, v)}
+    links = _populated_gitlinks(cwd) if not bad else (Path(cwd), [])
+    if isinstance(links, str):
+        return [links]
+    if links[1] and _depth >= 8:
+        return [f"(unreadable config: {_prefix}nested repositories deeper than 8)"]
+    for sub in links[1]:
+        bad.update(config_commands(sub, f"{_prefix}{sub.relative_to(links[0]).as_posix()}:", _depth + 1))
     return sorted(bad)
+
+
+# a submodule git can enter without a work tree (fetch/push recursion, a checkout that populates one) is never entered:
+# config_commands checks only populated gitlinks (#1662 R1)
+_NO_RECURSE = ["-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no"]
 
 
 def _refused(args: tuple[str, ...], check: bool, why: str) -> subprocess.CompletedProcess:
@@ -164,8 +177,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
-    drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`), or in a submodule's config in the
-    shared `.git/modules`, makes the call fail before git starts (#1390). Residual: a key written in the moment between that read and git's own read is not prevented;
+    drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`), or in the config of a populated
+    gitlink git would enter, makes the call fail before git starts (#1390); submodule recursion is off otherwise. Residual: a key written in the moment between that read and git's own read is not prevented;
     it is detected by a second read after the call, which then fails loudly (prevention: #1655).
     `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
     if _points_elsewhere(args):
@@ -174,7 +187,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     if bad:
         return _refused(args, check, f"refused: the repository config names a command git would run: {', '.join(bad)}")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           "-c", "protocol.ext.allow=never"]
+           "-c", "protocol.ext.allow=never", *_NO_RECURSE]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",

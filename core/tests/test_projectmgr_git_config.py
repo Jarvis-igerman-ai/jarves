@@ -5,6 +5,7 @@ No network; throw-away local repositories with an empty global config."""
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -200,19 +201,52 @@ def _with_submodule(tmp_path: Path) -> tuple[Path, Path]:
     return repo, repo / ".git" / "modules" / "lib" / "config"
 
 
-def test_a_command_named_in_a_submodule_config_never_runs(tmp_path):
-    """#1390 review R1: `git status` recurses into a populated submodule, whose config sits in the shared
-    `.git/modules`; a filter planted there must never run under JARVES."""
-    (repo, cfg), marker = _with_submodule(tmp_path), tmp_path / "ran.txt"
+def _layout(tmp_path: Path, form: str) -> tuple[Path, Path]:
+    """(the folder JARVES runs git in, the config file of the nested repository git recurses into)."""
+    repo, cfg = _with_submodule(tmp_path)
+    if form == "linked-worktree":                     # #1662 R1: a submodule initialised inside `worktree add`
+        wt = tmp_path / "wt"
+        subprocess.run(["git", "-c", "user.name=O", "-c", "user.email=o@x.invalid", "commit", "-qm", "sub"], cwd=repo,
+                       check=True)
+        subprocess.run(["git", "worktree", "add", "-q", str(wt)], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "protocol.file.allow=always", "submodule", "-q", "update", "--init"], cwd=wt,
+                       check=True, capture_output=True)
+        return wt, repo / ".git" / "worktrees" / "wt" / "modules" / "lib" / "config"
+    if form in ("embedded", "gitdir-file"):           # #1662 R2: a gitlink whose `.git` is not in .git/modules
+        lib = repo / "lib"
+        shutil.rmtree(lib / ".git") if (lib / ".git").is_dir() else (lib / ".git").unlink()
+        shutil.copytree(tmp_path / "lib" / ".git", lib / ".git")
+        if form == "gitdir-file":
+            shutil.move(str(lib / ".git"), str(tmp_path / "elsewhere"))
+            (lib / ".git").write_text(f"gitdir: {(tmp_path / 'elsewhere').as_posix()}\n", encoding="utf-8")
+        subprocess.run(["git", "checkout", "-q", "--", "."], cwd=lib, check=True)
+        return repo, (tmp_path / "elsewhere" if form == "gitdir-file" else lib / ".git") / "config"
+    return repo, cfg
+
+
+@pytest.mark.parametrize("form", ["modules", "linked-worktree", "embedded", "gitdir-file"])
+def test_a_command_named_in_a_nested_repository_config_never_runs(tmp_path, form):
+    """#1390 (#1650 R1, #1662 R1/R2): `git status` recurses into every populated gitlink, wherever its gitdir is;
+    a filter planted in that repository's config must never run under JARVES."""
+    (cwd, cfg), marker = _layout(tmp_path, form), tmp_path / "ran.txt"
     subprocess.run(["git", "config", "--file", str(cfg), "filter.evil.clean", _cmd(marker)], check=True)
-    os.utime(repo / "lib" / "g.txt", (1, 1))                       # same content, new stat: git must re-hash it
-    subprocess.run(["git", "status"], cwd=repo, capture_output=True, check=True)
+    os.utime(cwd / "lib" / "g.txt", (1, 1))                        # same content, new stat: git must re-hash it
+    subprocess.run(["git", "status"], cwd=cwd, capture_output=True, check=True)
     assert marker.exists()                                                       # the setup itself runs the filter
     marker.unlink()
-    os.utime(repo / "lib" / "g.txt", (2, 2))
-    with pytest.raises(gitops.GitError, match="modules/lib.*filter.evil.clean"):
-        gitops.git(repo, "status")
+    os.utime(cwd / "lib" / "g.txt", (2, 2))
+    with pytest.raises(gitops.GitError, match="lib:filter.evil.clean"):
+        gitops.git(cwd, "status")
     assert not marker.exists()
+
+
+def test_a_failed_nested_repository_read_is_refused(tmp_path, monkeypatch):
+    """#1662 R3: when git cannot list the gitlinks of a repository, the call is refused (fail closed)."""
+    repo, real = _repo(tmp_path), subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 1, b"", b"boom")
+                        if "ls-files" in argv else real(argv, **kw))
+    p = gitops.git(repo, "status", check=False)
+    assert p.returncode == 128 and "unreadable" in p.stderr
 
 
 def test_check_false_reports_a_refusal_as_a_failed_call(tmp_path):
