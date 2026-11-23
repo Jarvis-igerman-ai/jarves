@@ -92,23 +92,48 @@ def _own_branch(b: object) -> bool:
     return isinstance(b, str) and bool(_OWN_BRANCH.fullmatch(b)) and ".." not in b and not b.endswith("/")
 
 
+_PUSH_RISKY = ("credential.", "http.", "url.", "core.askpass", "core.sshcommand", "core.gitproxy")
+_BASE = re.compile(r"[A-Za-z0-9_][\w.\-/]{0,199}")
+
+
+def _push_risk(path: str) -> str:
+    """The first key in the project's own (local or worktree, includes followed) git config that could redirect an
+    explicit-URL push or see the owner's token (#1622 review): a remote other than origin (git uses a remote whose
+    name equals the URL argument, with its pushurl), credential.*, http.*, url.* (insteadOf), core.askPass,
+    core.sshCommand, core.gitProxy. '' when there is none."""
+    out = gitops.git(path, "config", "--show-scope", "--includes", "--list", "-z", check=False).stdout
+    parts = out.split("\0")                       # -z: scope NUL key LF value NUL ...
+    for scope, kv in zip(parts[0::2], parts[1::2]):
+        if scope not in ("local", "worktree"):
+            continue
+        key = kv.split("\n", 1)[0].lower()
+        if key.startswith(_PUSH_RISKY) or (key.startswith("remote.") and key.rsplit(".", 1)[0] != "remote.origin"):
+            return key
+    return ""
+
+
 def push_branch(path: str, branch: str, repo: str) -> None:
     """A normal push of one branch (never --force, never a tag, never the default branch) to the owner's recorded
-    owner/repo as an explicit URL, never to the `origin` remote (#1622: `remote.origin.url` is agent-writable). A
-    project-level `url.*.insteadOf` / `pushInsteadOf` could still rewrite that URL, so the push is refused while one
-    exists in the project's own (local or worktree) git config."""
+    owner/repo as an explicit URL, never to the `origin` remote (#1622: `remote.origin.url` is agent-writable). The
+    project's own git config can still redirect that URL or capture the owner's token, so the push is refused while
+    it holds any key _push_risk names."""
     if not _own_branch(branch):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
     url = f"https://github.com/{checked_slug(repo)}.git"
-    rw = gitops.git(path, "config", "--show-scope", "--includes", "--get-regexp", r"^url\..*\.(push)?insteadof$",
-                    check=False).stdout.splitlines()
-    if any(line.split(None, 1)[:1] in (["local"], ["worktree"]) for line in rw):
-        raise ForgeError("the project's git config rewrites URLs (url.*.insteadOf): JARVES does not push from it")
+    risky = _push_risk(path)
+    if risky:
+        raise ForgeError(f"the project's git config sets {risky[:80]}, which could redirect the push or see the "
+                         "GitHub login: JARVES does not push from it")
     gitops.git(path, "push", "--no-verify", url, f"{branch}:{branch}", timeout=300, ident=False)
 
 
 def create_pr(repo: str, head: str, base: str, title: str, body: str) -> str:
-    """repo: an explicit owner/repo from the caller; gh never resolves the target from the project's config (#1622)."""
+    """repo: an explicit owner/repo from the caller; gh never resolves the target from the project's config (#1622).
+    head is one of JARVES's own branches (never owner:branch); base is a plain branch name."""
+    if not _own_branch(head):
+        raise ForgeError("a pull request comes only from a jarves/p<N>/... branch")
+    if not isinstance(base, str) or not _BASE.fullmatch(base) or ".." in base or base.endswith(("/", ".lock")):
+        raise ForgeError("the pull request base is a plain branch name")
     out = gh("pr", "create", "--head", head, "--base", base, "--title", title[:200], "--body", body[:6000], repo=repo)
     m = re.search(r"https://github\.com/\S+/pull/\d+", out)
     return m.group(0) if m else out.strip()[:200]

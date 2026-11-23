@@ -302,7 +302,8 @@ class Manager(StageEngine):
             counts[t["status"]] = counts.get(t["status"], 0) + 1
         return {"id": p["id"], "name": p["name"], "path": p["path"], "goal": p["goal"], "status": p["status"],
                 "check": p["check_cmd"], "runners": p["runners"], "brief": p["brief"], "counts": counts,
-                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "", "release_cmd": p.get("release_cmd") or [],
+                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "",
+                "release_cmd": p.get("release_cmd") or [],
                 "flow": pl.describe(pl.parse(self._project_flow(p) or pl.DEFAULT_TEMPLATE, trusted=True)),
                 "total": len(ts), "branch": gitops.integration_branch(p["id"])}
 
@@ -373,7 +374,11 @@ class Manager(StageEngine):
             if github != "off" and not (github_repo or p.get("github_repo")):
                 return _res(False, "NEED_GITHUB_REPO", "name the GitHub repository: --github-repo owner/repo")
             f["github"] = github
-        if github_repo is not None:       # #1622: the owner names the target; the project's git config never decides it
+        if github_repo == "":             # clearing the recorded repo is allowed only with GitHub off
+            if (github if github is not None else p.get("github") or "off") != "off":
+                return _res(False, "NEED_GITHUB_OFF", "clear the GitHub repository together with --github off")
+            f["github_repo"] = ""
+        elif github_repo is not None:     # #1622: the owner names the target; the project's git config never decides it
             try:
                 f["github_repo"] = forge.checked_slug(github_repo)
             except forge.ForgeError:

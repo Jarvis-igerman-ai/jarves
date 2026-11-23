@@ -1316,7 +1316,6 @@ def test_forge_gh_never_sees_the_project_git_config_1622(fake_gh, tmp_path, monk
         forge.gh(str(repo), "auth", "status")
     for bad_ref in ("-R", "--web", "", 9, "https://github.com/attacker/evil/pull/1", "github.com/attacker/evil/pull/1",
                     "a/../b"):                                         # a flag, or a URL gh resolves past --repo
-
         with pytest.raises(forge.ForgeError):
             forge.pr_checks("o/r", bad_ref)
     assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # nothing bad ever ran gh
@@ -1367,11 +1366,63 @@ def test_forge_push_goes_to_the_recorded_repo_not_a_planted_origin_1622(tmp_path
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
     assert pushes == [("push", "--no-verify", "https://github.com/o/r.git", "jarves/p1/t1-a1:jarves/p1/t1-a1")]
     sh(repo, "git", "config", "url.https://github.com/attacker/evil.git.pushInsteadOf", "https://github.com/o/r.git")
-    with pytest.raises(forge.ForgeError, match="rewrites URLs"):
+    with pytest.raises(forge.ForgeError, match="url.https://github.com/attacker"):
         forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
     with pytest.raises(forge.ForgeError):
         forge.push_branch(str(repo), "jarves/p1/t1-a1", "")          # no recorded repo: no push at all
     assert len(pushes) == 1
+
+
+@pytest.mark.parametrize("key,value", [
+    ("remote.https://github.com/o/r.git.pushurl", "https://github.com/attacker/evil.git"),   # remote named as the URL
+    ("credential.helper", "!cat >/dev/null"),                                                 # sees the token on store
+    ("http.proxy", "http://127.0.0.1:9"), ("http.https://github.com/.extraHeader", "X: y"),
+    ("core.askPass", "/tmp/steal"), ("core.sshCommand", "ssh -o x"), ("remote.evil.url", "https://x/y.git")])
+def test_forge_push_refuses_config_that_redirects_or_reads_the_login_1622(tmp_path, monkeypatch, key, value):
+    """#1622 review R1: beyond insteadOf, a planted remote.<url>.pushurl, credential helper, http.* or askPass in the
+    project's own (also included) config would redirect the explicit-URL push or capture the owner's token."""
+    from jarves.projectmgr import forge, gitops
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
+    sh(repo, "git", "config", "remote.origin.pushurl", "https://github.com/o/r.git")   # origin itself is harmless
+    pushes, real_git = [], gitops.git
+
+    def spy(cwd, *args, **kw):
+        if args[:1] == ("push",):
+            pushes.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return real_git(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", spy)
+    forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    inc = tmp_path / "inc.cfg"                                         # hidden behind an include
+    inc.write_text("")
+    sh(repo, "git", "config", "include.path", str(inc))
+    subprocess.run(["git", "config", "-f", str(inc), key, value], check=True)
+    with pytest.raises(forge.ForgeError, match="JARVES does not push"):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert len(pushes) == 1
+
+
+def test_forge_create_pr_head_and_base_are_checked_1622(fake_gh, tmp_path):
+    """#1622 review R2: head is one of JARVES's own branches (never owner:branch), base a plain branch name."""
+    from jarves.projectmgr import forge
+    for head, base in (("attacker:jarves/p1/x", "main"), ("main", "main"), ("jarves/p1/x", "o:main"),
+                       ("jarves/p1/x", "--web"), ("jarves/p1/x", "a/../b"), ("jarves/p1/x", ""), ("jarves/p1/x", 7)):
+        with pytest.raises(forge.ForgeError):
+            forge.create_pr("o/r", head, base, "t", "b")
+    assert not (tmp_path / "gh_calls.jsonl").exists()
+
+
+def test_github_repo_can_be_cleared_only_with_github_off_1622(env, fake_gh):
+    """#1622 review R3: the owner can clear a recorded repo, but only together with GitHub off."""
+    m, repo, _ = env
+    open_project(m, repo)
+    assert m.call("configure", project="demo", github="write", github_repo="o/r")["ok"]
+    assert m.call("configure", project="demo", github_repo="")["code"] == "NEED_GITHUB_OFF"
+    r = m.call("configure", project="demo", github="off", github_repo="")
+    assert r["ok"] and r["project"]["github"] == "off" and r["project"]["github_repo"] == "", r
 
 
 def test_github_op_tells_a_migrated_project_to_record_its_repo_1622(env, fake_gh):
