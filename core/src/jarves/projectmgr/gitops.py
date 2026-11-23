@@ -68,6 +68,93 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 
+# config keys that name a command git runs (#1390). core.hooksPath and core.fsmonitor are not listed: every call
+# overrides both. Pagers are not listed: git never starts one without a terminal and every call captures output.
+# includeIf is listed because its condition (branch, gitdir) can match only inside a new worktree.
+_RUNS = re.compile(
+    r"(core\.(sshcommand|editor|askpass|gitproxy)|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
+    r"|credential\.(.+\.)?helper|filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
+    r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
+    r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+|gpg\..+\.defaultkeycommand|submodule\..+\.update"
+    r"|core\.alternaterefscommand|interactive\.difffilter|(browser|man)\..+\.(cmd|path)|web\.browser|help\.browser"
+    r"|instaweb\..+)")
+# values that name no command: an empty credential.helper resets the list, and submodule.*.update runs a command
+# only as `!cmd` (checkout/rebase/merge/none are what `git submodule init` copies from .gitmodules)
+_HARMLESS = {"credential": lambda v: v == "", "submodule": lambda v: not v.startswith("!")}
+_SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
+# git options that point git at another repository than `cwd`, which config_commands checked
+_ELSEWHERE = ("-C", "--git-dir", "--work-tree")
+# global options whose value is the NEXT argument (git's own list); the scan skips that value
+_TAKES_VALUE = ("-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix",
+                "--attr-source", "--list-cmds")
+
+
+def _points_elsewhere(args: tuple[str, ...]) -> bool:
+    """True when a global option before the subcommand selects another repository (#1390 review): option values
+    (`-c k=v`) are skipped, so a later `-C`/`--git-dir`/`--work-tree` is still seen; `-Cdir` counts too."""
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        a = args[i]
+        if a.split("=", 1)[0] in _ELSEWHERE or a.startswith("-C"):
+            return True
+        i += 2 if a in _TAKES_VALUE else 1
+    return False
+
+
+def _names_command(key: str, value: str) -> bool:
+    harmless = _HARMLESS.get(key.split(".", 1)[0])
+    return bool(_RUNS.fullmatch(key)) and not (harmless and harmless(value.strip()))
+
+
+def _read_config(cwd: str | Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "config", *args, "--list", "-z"], cwd=str(cwd), capture_output=True,
+                          creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), timeout=30)
+
+
+def _pairs(out: bytes) -> list[tuple[str, str]]:
+    return [((kv.split("\n", 1) + [""])[0].lower(), (kv.split("\n", 1) + [""])[1])
+            for kv in out.decode("utf-8", "replace").split("\0") if kv]
+
+
+def _module_configs(cwd: str | Path) -> list[Path]:
+    """Config files of every submodule (nested ones too) in the shared `<common dir>/modules` (#1390 review R1):
+    `git status`, a checkout or a merge runs git inside a populated submodule with that submodule's own config."""
+    p = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(cwd),
+                       capture_output=True, creationflags=_NOWIN, env=child_env(), timeout=30)
+    root = Path(os.fsdecode(p.stdout.strip())) / "modules" if p.returncode == 0 else None
+    found: list[Path] = []
+    for d, subdirs, files in os.walk(root) if root and root.is_dir() else ():
+        subdirs[:] = [x for x in subdirs if x not in ("objects", "refs", "logs", "lfs")]     # no config below these
+        found += [Path(d) / f for f in files if f in ("config", "config.worktree")]
+    return sorted(found)
+
+
+def config_commands(cwd: str | Path) -> list[str]:
+    """Keys in the repository's own config, and in each submodule's config, that name a command (#1390). Both sit
+    in the shared `.git` folder every agent can write; the owner's global/system config is not checked. A config
+    git cannot read is refused too (fail closed)."""
+    p = _read_config(cwd, "--show-scope")
+    if p.returncode != 0:
+        return [f"(unreadable config: {p.stderr.decode('utf-8', 'replace').strip()[:150]})"]
+    parts = p.stdout.decode("utf-8", "replace").split("\0")
+    own = b"\0".join(kv.encode() for scope, kv in zip(parts[::2], parts[1::2]) if scope in _SHARED_SCOPES)
+    bad = {k for k, v in _pairs(own) if _names_command(k, v)}
+    for f in _module_configs(cwd):
+        name = f.parent.as_posix().split("/modules/", 1)[-1]
+        q = _read_config(f.parent, "--file", str(f), "--includes")
+        if q.returncode != 0:
+            bad.add(f"(unreadable config: modules/{name})")
+        bad |= {f"modules/{name}:{k}" for k, v in _pairs(q.stdout) if _names_command(k, v)}
+    return sorted(bad)
+
+
+def _refused(args: tuple[str, ...], check: bool, why: str) -> subprocess.CompletedProcess:
+    """A #1390 refusal: GitError with check=True; with check=False a failed result (code 128), as before #1390 a
+    `check=False` call never raised GitError, and its callers already treat a non-zero code as a failure."""
+    if check:
+        raise GitError(f"{why[:250]} (#1390)")
+    return subprocess.CompletedProcess(["git", *args], 128, "", f"{why} (#1390)")
+
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
@@ -76,9 +163,18 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
+    drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`), or in a submodule's config in the
+    shared `.git/modules`, makes the call fail before git starts (#1390). Residual: a key written in the moment between that read and git's own read is not prevented;
+    it is detected by a second read after the call, which then fails loudly (prevention: #1655).
+    `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
+    if _points_elsewhere(args):
+        return _refused(args, check, "refused: a git call may not point git at another folder than the one checked")
+    bad = config_commands(cwd)
+    if bad:
+        return _refused(args, check, f"refused: the repository config names a command git would run: {', '.join(bad)}")
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "protocol.ext.allow=never"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -86,6 +182,10 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
+    late = [k for k in config_commands(cwd) if not k.startswith("(")]     # detect a key written during the call
+    if late:
+        return _refused(args, check, f"refused: the repository config changed during the call to name a command: "
+                                     f"{', '.join(late)}")
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
@@ -94,7 +194,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, GitError):
         return False
 
 
