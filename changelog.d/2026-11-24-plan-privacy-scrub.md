@@ -1,1 +1,1 @@
-- Fixed: privacy mode now also removes tool text that goal plans stored before privacy was switched on (step evidence and errors, plan notes and results keep only status and codes) (#1526).
+- Fixed: privacy mode now also removes tool text that goal plans stored before privacy was switched on: step evidence is blanked, step errors and plan notes keep only their code, a done plan's result keeps only step status, and any other plan's result is cleared (#1526).

@@ -697,7 +697,19 @@ async def test_1526_privacy_switched_on_scrubs_tool_text_written_before(env, mon
     assert d["state"] == "done" and d["steps"][0]["status"] == "done" and d["steps"][0]["evidence"] == ""
     assert d["result"].startswith("1/1 steps done.") and "fake_read: done" in d["result"]
     assert f["state"] == "failed" and f["steps"][0]["error"] == "X_BROKE" and f["note"] == "step 1: X_BROKE"
+    assert f["result"] == ""                                            # review R2: only a done plan keeps a result
     assert env.store.scrub_if_private() == 0                            # once per switch, not every tick
+
+    private["on"] = False                                               # review R3: off -> on again scrubs again
+    assert env.store.scrub_if_private() == 0
+    again = env.store.propose("again", steps(("fake_read", {"text": "secret-b"})))
+    env.store.approve(again["id"])
+    await env.runner.tick()
+    env.db.x("UPDATE goal_plans SET result='legacy secret-c' WHERE id=?", (bad["id"],))   # a non-done result, any format
+    assert "read secret-b" in json.dumps(env.store.get(again["id"]))
+    private["on"] = True
+    assert env.store.scrub_if_private() > 0
+    assert "read secret-b" not in json.dumps(env.store.get(again["id"])) and env.store.get(bad["id"])["result"] == ""
 
 
 def test_1526_codes_only_keeps_fixed_sentences():

@@ -308,7 +308,8 @@ class PlanStore:
     # ------------------------------------------------------------------ privacy at rest
     def scrub_private(self) -> int:
         """#1526: rows written before privacy was on still hold tool text. Blank step evidence, cut step errors and plan
-        notes to their code, and rebuild each plan result from status only: ONE transaction. Returns rows changed."""
+        notes to their code, and rebuild a done plan's result from status only (any other state's result is dropped: only
+        _finish writes one, so its format is unknown): ONE transaction. Returns rows changed."""
         n = 0
         with self.db._lock:
             c = self.db._db
@@ -322,9 +323,10 @@ class PlanStore:
                         n += 1
                     st["evidence"], st["error"] = "", err
                     by_plan.setdefault(st["plan_id"], []).append(st)
-                for p in c.execute("SELECT id, note, result FROM goal_plans").fetchall():
+                for p in c.execute("SELECT id, state, note, result FROM goal_plans").fetchall():
                     note = _codes_only(p["note"])
-                    result = _result(by_plan.get(p["id"], [])) if p["result"] else (p["result"] or "")
+                    done = p["state"] == "done" and p["result"]
+                    result = _result(by_plan.get(p["id"], [])) if done else ""
                     if note != (p["note"] or "") or result != (p["result"] or ""):
                         c.execute("UPDATE goal_plans SET note=?, result=? WHERE id=?", (note, result, p["id"]))
                         n += 1
