@@ -766,7 +766,48 @@ def test_1526_codes_only_keeps_every_fixed_sentence_in_goal_plans():
         name = getattr(n.func, "attr", getattr(n.func, "id", ""))
         args = [a for i, a in enumerate(n.args) if (name, i) in {("_block", 2), ("_fail", 2), ("_stop_plan", 2)}]
         args += [k.value for k in n.keywords if k.arg == "note"]
-        found += [s for s in map(text, args) if s]
+        found += [s for s in map(text, args) if s and not s.startswith("step 1: ")]   # the "step N: {why}" wrapper
     assert len(found) >= 10
     for s in found:
         assert gp._codes_only(s) == s and gp._codes_only(f"step 1: {s}") == f"step 1: {s}", s
+
+
+def test_1526_codes_only_drops_text_after_any_code_shape():
+    """Doctor round: a tool code with a space or punctuation must not keep its text (fail closed)."""
+    assert gp._codes_only("HTTP error: secret body") == "HTTP error"
+    assert gp._codes_only("step 3: bad code!: secret: more") == "step 3: bad code!"
+    assert gp._codes_only("step 1: text written by others was read earlier in this plan: resume to continue") == \
+        "step 1: text written by others was read earlier in this plan: resume to continue"
+
+
+async def test_1526_scrub_reads_and_rewrites_under_one_write_lock(env, monkeypatch):
+    """Doctor round: another process (phone/dashboard) must not write between the scrub's read and its rewrite,
+    or the scrub writes the stale value back (lost update)."""
+    import sqlite3
+    private = {"on": False}
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    bad = env.store.propose("bad", steps(("fake_bad", {})))
+    env.store.approve(bad["id"])
+    await env.runner.tick()
+    assert env.store.get(bad["id"])["steps"][0]["error"].startswith("X_BROKE: ")
+    other, seen = sqlite3.connect(env.db.path, timeout=0), []
+
+    def trace(sql):
+        if sql.startswith("UPDATE goal_plan_steps SET evidence=''") and not seen:   # read done, rewrite next
+            try:
+                other.execute("UPDATE goal_plan_steps SET error='retried' WHERE plan_id=?", (bad["id"],))
+                other.commit()
+                seen.append("written")
+            except sqlite3.OperationalError:
+                other.rollback()
+                seen.append("locked")
+    env.db._db.set_trace_callback(trace)
+    private["on"] = True
+    try:
+        env.store.scrub_private()
+    finally:
+        env.db._db.set_trace_callback(None)
+        other.close()
+    err = env.store.get(bad["id"])["steps"][0]["error"]
+    assert seen == ["locked"] or err == "retried", (seen, err)
+    assert seen, "the trace never saw the scrub's rewrite"

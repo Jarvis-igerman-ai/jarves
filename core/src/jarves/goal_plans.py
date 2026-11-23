@@ -74,15 +74,20 @@ def _at_rest(text: str) -> str:
     return "" if logs.privacy() else text
 
 
-_CODE_TEXT = re.compile(r"^((?:step \d+: )?[A-Za-z][A-Za-z0-9_.-]*): .*$", re.S)
+_STEP = re.compile(r"(step \d+: )?(.*)\Z", re.S)
+# The only fixed sentences of this module that contain ": " (test_1526_codes_only_keeps_every_fixed_sentence_in_goal_plans).
+_FIXED_COLON = frozenset({"the step timed out: it may already have happened",
+                          "text written by others was read earlier in this plan: resume to continue",
+                          "interrupted by a restart: resume when ready"})
 
 
 def _codes_only(text: object) -> str:
-    """#1526: "CODE: tool text" (optionally behind "step N: ") keeps only the code; fixed sentences written by this
-    module (they never start with a single code word followed by ': ') stay as they are."""
-    s = str(text or "")
-    m = _CODE_TEXT.match(s)
-    return m.group(1) if m else s
+    """#1526: tool text is only ever written after "CODE: " (optionally behind "step N: "), so everything after the
+    first ": " is dropped, whatever the code looks like (fail closed); the module's own fixed sentences stay."""
+    prefix, rest = _STEP.match(str(text or "")).groups()
+    if rest in _FIXED_COLON or ": " not in rest:
+        return (prefix or "") + rest
+    return (prefix or "") + rest.split(": ", 1)[0]
 
 
 def _result(steps: list[dict]) -> str:
@@ -311,11 +316,12 @@ class PlanStore:
     def scrub_private(self) -> int:
         """#1526: rows written before privacy was on still hold tool text. Blank step evidence, cut step errors and plan
         notes to their code, and rebuild a done plan's result from status only (any other state's result is dropped: only
-        _finish writes one, so its format is unknown): ONE transaction. Returns rows changed."""
+        _finish writes one, so its format is unknown): ONE write transaction. Returns rows changed."""
         n = 0
         with self.db._lock:
             c = self.db._db
             try:
+                c.execute("BEGIN IMMEDIATE")      # read and rewrite under one write lock: no other process writes between
                 steps = [dict(r) for r in c.execute("SELECT * FROM goal_plan_steps ORDER BY plan_id, idx").fetchall()]
                 by_plan: dict[int, list[dict]] = {}
                 for st in steps:
