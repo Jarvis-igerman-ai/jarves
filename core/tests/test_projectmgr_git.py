@@ -319,11 +319,13 @@ def test_an_unreadable_config_fails_closed(monkeypatch, tmp_path):
     assert gitops.is_repo(str(tmp_path)) is False
 
 
-@pytest.mark.parametrize("key", [b"filter.\xff.clean", b"merge.\xfe.driver"])
-def test_a_config_name_that_is_not_utf8_fails_closed(tmp_path, key):
-    """#1407 review R1: git matches subsection bytes exactly; a lossy decode would override a different key."""
+@pytest.mark.parametrize("section", [b'[filter "\xff"]\n\tclean = x\n', b'[merge "\xfe"]\n\tdriver = x\n'])
+def test_a_config_name_that_is_not_utf8_fails_closed(tmp_path, section):
+    """#1407 review R1: git matches subsection bytes exactly; a lossy decode would override a different key. The raw
+    bytes go straight into the config file (Windows cannot pass non-UTF-8 bytes on a command line)."""
     repo = _repo(tmp_path)
-    subprocess.run([b"git", b"config", key, b"x"], cwd=repo, check=True)
+    with open(repo / ".git" / "config", "ab") as f:
+        f.write(section)
     with pytest.raises(gitops.GitError, match="cannot neutralise"):
         gitops.git(repo, "status")
 
