@@ -309,36 +309,61 @@ class PlanStore:
     # ------------------------------------------------------------------ privacy (#1526)
     def scrub_private(self) -> int:
         """Privacy switched on: blank the text kept by rows written before it (step evidence and error, the plan's
-        note and result) in ONE transaction; state, status and the "N/M steps done." count stay. The old bytes are
-        overwritten (secure_delete) and the WAL is truncated so they do not linger on disk. Returns rows changed."""
+        note and result) in ONE explicit transaction; state, status and the "N/M steps done." count stay. The old
+        bytes are overwritten (secure_delete). It never waits for another writer (busy_timeout 0): a locked database
+        raises and the runner retries. Then call truncate_wal(). Returns rows changed."""
         with self.db._lock:
             c = self.db._db
-            old = c.execute("PRAGMA secure_delete").fetchone()[0]
-            c.execute("PRAGMA secure_delete=ON")
+            if c.in_transaction:                     # never adopt (and commit) someone else's open transaction
+                raise sqlite3.OperationalError("a transaction is already open on memory.db")
+            saved = self._quick(c, secure_delete=1)
             try:
-                n = c.execute("UPDATE goal_plan_steps SET evidence='', error='' WHERE evidence!='' OR error!=''").rowcount
-                for r in c.execute("SELECT id, note, result FROM goal_plans WHERE note!='' OR result!=''").fetchall():
-                    m = _DONE.match(r["result"] or "")
-                    keep = m.group(0) if m else ""
-                    if (r["note"], r["result"]) != ("", keep):
-                        c.execute("UPDATE goal_plans SET note='', result=? WHERE id=?", (keep, r["id"]))
-                        n += 1
-                c.commit()
-            except BaseException:
-                c.rollback()
-                raise
+                c.execute("BEGIN IMMEDIATE")
+                try:
+                    n = c.execute("UPDATE goal_plan_steps SET evidence='', error='' WHERE evidence!='' OR error!=''").rowcount
+                    for r in c.execute("SELECT id, note, result FROM goal_plans WHERE note!='' OR result!=''").fetchall():
+                        m = _DONE.match(r["result"] or "")
+                        keep = m.group(0) if m else ""
+                        if (r["note"], r["result"]) != ("", keep):
+                            c.execute("UPDATE goal_plans SET note='', result=? WHERE id=?", (keep, r["id"]))
+                            n += 1
+                    c.commit()
+                except BaseException:
+                    c.rollback()
+                    raise
             finally:
-                c.execute(f"PRAGMA secure_delete={int(old)}")
-            wait = c.execute("PRAGMA busy_timeout").fetchone()[0]
-            c.execute("PRAGMA busy_timeout=0")          # never block the Core's loop waiting for another reader
-            try:
-                busy = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
-            finally:
-                c.execute(f"PRAGMA busy_timeout={int(wait)}")
-        if busy:
-            logs.warn("goals", "PLAN_SCRUB_WAL_BUSY", "old plan text may stay in the WAL until the next checkpoint")
+                self._restore(c, saved)
         logs.info("goals", "PLAN_SCRUBBED", "plan text written before privacy mode was removed", count=n)
         return n
+
+    def truncate_wal(self) -> bool:
+        """Copy the scrubbed pages into memory.db and empty the WAL, without waiting. False = another reader is busy."""
+        with self.db._lock:
+            c = self.db._db
+            saved = self._quick(c)
+            try:
+                return c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] == 0
+            finally:
+                self._restore(c, saved)
+
+    @staticmethod
+    def _quick(c, **extra) -> dict:
+        """Set busy_timeout=0 (plus `extra` pragmas) and return the old values for _restore."""
+        want = {"busy_timeout": 0, **extra}
+        saved = {k: int(c.execute(f"PRAGMA {k}").fetchone()[0]) for k in want}
+        for k, v in want.items():
+            c.execute(f"PRAGMA {k}={int(v)}")
+        return saved
+
+    @staticmethod
+    def _restore(c, saved: dict) -> None:
+        """Each setting on its own: a failed restore is logged and never hides the scrub's own error."""
+        for k, v in saved.items():
+            try:
+                c.execute(f"PRAGMA {k}={int(v)}")
+            except sqlite3.Error as e:
+                logs.warn("goals", "PLAN_SCRUB_PRAGMA_RESTORE_FAILED", "could not restore a database setting",
+                          setting=k, **logs.error_fields(e))
 
 
 _DONE = re.compile(r"\d+/\d+ steps done\.")   # the count kept in a scrubbed result
@@ -418,6 +443,7 @@ class PlanRunner:
         self._stop = False
         self._private: bool | None = None     # last privacy state seen; None = not checked since the Core started
         self._scrub_failed = False
+        self._wal_pending = self._wal_warned = False
 
     def _scrub_on_privacy(self) -> None:
         """#1526: at Core start and whenever privacy turns on, remove plan text written before it (feature on or off)."""
@@ -430,8 +456,19 @@ class PlanRunner:
                     logs.warn("goals", "PLAN_SCRUB_FAILED", "could not remove old plan text; will retry", **logs.error_fields(e))
                 self._scrub_failed = True
                 return
-            self._scrub_failed = False
+            self._scrub_failed, self._wal_pending = False, True
         self._private = on
+        if self._wal_pending:                        # retried every tick until the old bytes left memory.db and the WAL
+            try:
+                done, err = self.store.truncate_wal(), None
+            except sqlite3.Error as e:
+                done, err = False, e
+            if done:
+                self._wal_pending = self._wal_warned = False
+            elif not self._wal_warned:
+                self._wal_warned = True
+                logs.warn("goals", "PLAN_SCRUB_WAL_BUSY", "old plan text may stay in memory.db until the WAL checkpoint "
+                          "succeeds; retrying", **logs.error_fields(err or "WAL_BUSY"))
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)

@@ -740,21 +740,134 @@ async def test_1526_failed_scrub_is_logged_once_retried_and_never_stops_plans(en
     assert len(tries) == 2 and seen.count("PLAN_SCRUB_FAILED") == 1
 
 
-def test_1526_busy_wal_is_reported_not_hidden(env, monkeypatch):
-    import sqlite3
+class _Conn:
+    """Wraps the store's sqlite connection: `fail(sql)` may raise; `seen` records busy_timeout at every BEGIN."""
+
+    def __init__(self, real, fail=lambda _sql: False):
+        self.real, self.fail, self.seen = real, fail, []
+
+    def execute(self, sql, args=()):
+        if self.fail(sql):
+            raise __import__("sqlite3").OperationalError(f"forced: {sql[:30]}")
+        if sql.startswith("BEGIN"):
+            self.seen.append(self.real.execute("PRAGMA busy_timeout").fetchone()[0])
+        return self.real.execute(sql, args)
+
+    def __getattr__(self, k):
+        return getattr(self.real, k)
+
+
+async def _text_plan(env, monkeypatch):
     monkeypatch.setattr(gp.logs, "privacy", lambda: False)
-    env.store.propose("p", steps(("fake_read", {"text": "a"})))
+    p = env.store.propose("p", steps(("fake_read", {"text": "secret-a"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    return p["id"]
+
+
+async def test_1526_busy_wal_is_retried_until_truncated_and_warned_once(env, monkeypatch):
+    import sqlite3
+    pid = await _text_plan(env, monkeypatch)
     seen = []
-    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
-    monkeypatch.setattr(gp.logs, "info", lambda _c, code, *_a, **_k: seen.append(code))
-    c = env.db._db
-    env.db._db.execute("PRAGMA secure_delete=0")
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, msg, *_a, **_k: seen.append((code, msg)))
     reader = sqlite3.connect(env.db.path)
     reader.execute("BEGIN")
     reader.execute("SELECT count(*) FROM goal_plans").fetchone()     # another process is reading: TRUNCATE cannot finish
-    try:
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    await env.runner.tick()
+    assert [c for c, _ in seen] == ["PLAN_SCRUB_WAL_BUSY"] and "memory.db" in seen[0][1]
+    assert "read secret-a" not in json.dumps(env.store.get(pid))
+    reader.close()
+    await env.runner.tick()                                            # the reader is gone: the retry truncates
+    assert b"read secret-a" not in _on_disk(env.db) and env.runner._wal_pending is False
+    c = env.db._db                                                     # it never waited, and the settings are restored
+    assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
+
+async def test_1526_error_mid_scrub_rolls_back_everything_and_restores_settings(env, monkeypatch):
+    pid = await _text_plan(env, monkeypatch)
+    real = env.db._db
+    real.execute("PRAGMA secure_delete=0")
+    env.db._db = _Conn(real, fail=lambda sql: sql.startswith("UPDATE goal_plans SET note"))
+    import sqlite3
+    with pytest.raises(sqlite3.OperationalError, match="forced"):
         env.store.scrub_private()
+    env.db._db = real
+    assert env.store.get(pid)["steps"][0]["evidence"] == "read secret-a"   # the step UPDATE ran first and was undone
+    assert real.execute("PRAGMA secure_delete").fetchone()[0] == 0 and real.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    assert not real.in_transaction
+
+
+async def test_1526_scrub_never_waits_for_another_writer(env, monkeypatch):
+    import sqlite3
+    await _text_plan(env, monkeypatch)
+    env.db._db = conn = _Conn(env.db._db)
+    writer = sqlite3.connect(env.db.path, timeout=0)
+    writer.execute("BEGIN IMMEDIATE")                                  # another process holds the write lock
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            env.store.scrub_private()                                 # fails at once; the runner retries next tick
     finally:
-        reader.close()
-    assert seen == ["PLAN_SCRUB_WAL_BUSY", "PLAN_SCRUBBED"]          # it did not wait, and the settings are restored
-    assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 5000 and c.execute("PRAGMA secure_delete").fetchone()[0] == 0
+        writer.close()
+    assert conn.seen == [0]
+    assert env.store.scrub_private() == 2 and conn.seen == [0, 0]
+
+
+async def test_1526_privacy_on_off_on_scrubs_again(env, monkeypatch):
+    pid = await _text_plan(env, monkeypatch)
+    private = {"on": True}
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    await env.runner.tick()
+    private["on"] = False                                              # full text again: a new plan keeps its text
+    q = env.store.propose("q", steps(("fake_read", {"text": "secret-b"})))
+    env.store.approve(q["id"])
+    await env.runner.tick()
+    assert "read secret-b" in json.dumps(env.store.get(q["id"]))
+    private["on"] = True
+    await env.runner.tick()
+    assert "read secret" not in json.dumps([env.store.get(pid), env.store.get(q["id"])])
+
+
+def test_1526_failed_settings_restore_is_logged_and_keeps_the_first_error(env, monkeypatch):
+    import sqlite3
+    seen = []
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
+    real = env.db._db
+    real.execute("PRAGMA secure_delete=0")
+    env.db._db = _Conn(real, fail=lambda sql: sql.startswith(("BEGIN", "PRAGMA secure_delete=0")))
+    with pytest.raises(sqlite3.OperationalError, match="forced: BEGIN"):
+        env.store.scrub_private()
+    env.db._db = real
+    assert seen == ["PLAN_SCRUB_PRAGMA_RESTORE_FAILED"]
+    assert real.execute("PRAGMA busy_timeout").fetchone()[0] == 5000   # the other setting was still restored
+
+
+async def test_1526_wal_checkpoint_error_is_warned_once_and_retried(env, monkeypatch):
+    import sqlite3
+    await _text_plan(env, monkeypatch)
+    seen, tries = [], []
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **k: seen.append((code, k.get("error_type"))))
+
+    def broken():
+        tries.append(1)
+        if len(tries) < 3:
+            raise sqlite3.OperationalError("disk I/O error")
+        return True
+    monkeypatch.setattr(env.store, "truncate_wal", broken)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    for _ in range(4):
+        await env.runner.tick()
+    assert tries == [1, 1, 1] and seen == [("PLAN_SCRUB_WAL_BUSY", "OperationalError")]
+
+
+async def test_1526_scrub_never_adopts_an_open_transaction(env, monkeypatch):
+    import sqlite3
+    pid = await _text_plan(env, monkeypatch)
+    c = env.db._db
+    c.execute("UPDATE goal_plans SET title='mine' WHERE id=?", (pid,))   # someone else's transaction is open
+    with pytest.raises(sqlite3.OperationalError, match="already open"):
+        env.store.scrub_private()
+    assert c.in_transaction                                            # neither committed nor rolled back by the scrub
+    c.rollback()
+    assert env.store.get(pid)["title"] == "p" and "read secret-a" in json.dumps(env.store.get(pid))
