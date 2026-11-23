@@ -15,6 +15,7 @@ Two one-way actions (each needs {"confirm": true}):
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -69,6 +70,7 @@ def set_full_text(ctx, on: bool) -> dict:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
+        scrub_stored_text(ctx.home)
     return state(ctx)
 
 
@@ -82,7 +84,89 @@ def set_privacy(ctx, on: bool) -> dict:
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
+    if on:
+        scrub_stored_text(ctx.home)
     return {**state(ctx), "saved_in_config": saved, "config_error": err}
+
+
+# #1557: text written to disk before privacy was switched on. New rows already keep no text (#206 F13); these rows are
+# rewritten the same way once privacy is on (here, and by the Core's tick for a switch from another process, a start
+# with privacy on, or the end of a full-text window). The conversation history itself stays on "mask existing history".
+_STEP_NOTE = re.compile(r"(step \d+: )(.*)", re.S)       # a plan note written by a stopped step
+
+
+def _note_at_rest(note: str) -> str:
+    from .goal_plans import reason_at_rest
+    m = _STEP_NOTE.fullmatch(note or "")
+    return m.group(1) + reason_at_rest(m.group(2)) if m else note
+
+
+def _scrub_ledger(home: Path) -> int:
+    from . import continuity, mobile
+    path = home / continuity.DB_FILE
+    if not path.is_file():
+        return 0
+    fixes = {"chat": mobile.chat_at_rest, "goal": mobile._goal_at_rest}
+    n = 0
+    cx = sqlite3.connect(path, timeout=10)
+    try:
+        with cx:
+            cx.execute("PRAGMA secure_delete=ON")
+            for device, cid, kind, body in cx.execute("SELECT device, cid, kind, body FROM ledger WHERE kind IN "
+                                                      "('chat', 'goal')").fetchall():
+                try:
+                    d = json.loads(body)
+                except ValueError:
+                    d = None
+                new = json.dumps(fixes[kind](d if isinstance(d, dict) else {}))
+                if new != body:      # the row (and so the duplicate-command protection) stays, only the text goes
+                    cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?", (new, device, cid))
+                    n += 1
+    finally:
+        cx.close()
+    return n
+
+
+def _scrub_plan_steps(home: Path) -> int:
+    path = home / "memory.db"
+    if not path.is_file():
+        return 0
+    n = 0
+    cx = sqlite3.connect(path, timeout=10)
+    try:
+        with cx:
+            cx.execute("PRAGMA secure_delete=ON")
+            if not cx.execute("SELECT 1 FROM sqlite_master WHERE name='goal_plan_steps'").fetchone():
+                return 0
+            from .goal_plans import reason_at_rest
+            for sid, error in cx.execute("SELECT id, error FROM goal_plan_steps WHERE evidence != '' OR error != ''"
+                                         ).fetchall():
+                new = reason_at_rest(error)
+                n += cx.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=? AND (evidence != '' "
+                                "OR error != ?)", (new, sid, new)).rowcount
+            for pid, note in cx.execute("SELECT id, note FROM goal_plans WHERE note != ''").fetchall():
+                if _note_at_rest(note) != note:   # 'step 2: CODE: tool text' from a failed step
+                    cx.execute("UPDATE goal_plans SET note=? WHERE id=?", (_note_at_rest(note), pid))
+                    n += 1
+    finally:
+        cx.close()
+    return n
+
+
+def scrub_stored_text(home: Path) -> dict:
+    """Best effort (a busy database is retried by the Core's next tick); logs counts only, never the text."""
+    out = {}
+    for name, fn in (("ledger", _scrub_ledger), ("plan_steps", _scrub_plan_steps)):
+        try:
+            out[name] = fn(Path(home))
+        except sqlite3.Error as e:
+            out[name] = None
+            logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older stored text could not be removed yet", part=name,
+                      error_type=type(e).__name__)
+    if any(out.values()):
+        logs.info("privacy", "PRIVACY_SCRUBBED", "older stored text removed after privacy was switched on",
+                  ledger=out.get("ledger"), plan_steps=out.get("plan_steps"))
+    return out
 
 
 # ---------------------------------------------------------------------- one-way actions

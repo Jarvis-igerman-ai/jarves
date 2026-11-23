@@ -229,7 +229,7 @@ FIELD_CLASS: dict[str, str] = {
         transport plugin provider handler tailnet tls_source hours bind_tailnet_only
         tasks waited_s false_wakes good_wakes signal backend_busy tools_running delegations_open mic_level echo_level
         rejected times accept always_confirm tune_level peak fix since_start_s configured_threshold effective_threshold
-        trust refused
+        trust refused ledger plan_steps
         dropped duplicates already_skipped any_do_checked
         """),
     **_reg(SECRET, """

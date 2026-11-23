@@ -367,6 +367,7 @@ class Operations:
             except Exception:
                 logs.error("goals", "PLAN_DONE_LINE_FAILED", "plan finished line failed", exc=True)
         await self.alerts.flush()
+        self._privacy_scrub()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
             self._synced = now
@@ -382,6 +383,16 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
             except Exception:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
+
+    def _privacy_scrub(self) -> None:
+        """#1557: once privacy is on (at start, switched by another process, or a full-text window ended), remove the
+        text kept on disk from before; again after every off -> on change. A failed attempt is retried next tick."""
+        on = logs.privacy()
+        if on and not getattr(self, "_privacy_scrubbed", False):
+            from . import privacy as privacy_mod
+            res = privacy_mod.scrub_stored_text(self.core.home)
+            on = None not in res.values()
+        self._privacy_scrubbed = bool(on)
 
     async def stop(self) -> None:
         await self.scheduler.stop()            # no tick may run after the history store is closed below

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import unicodedata
 
@@ -65,6 +66,29 @@ def _clean(text: object, n: int) -> str:
 def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     s = " ".join(str(text or "").split())
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+# #1557: the step reasons the runner writes itself (fixed sentences, no tool text); anything else is scrubbed.
+FIXED_REASONS = frozenset((
+    "tool not available (switched off or removed)",
+    "text written by others was read earlier in this plan: resume to continue",
+    "the arguments are too long to show in full for your approval; shorten the step",
+    "the owner did not approve this step",
+    "no approval was given for this step (no answer in time or nowhere to ask)",
+    "the step timed out", "the step timed out: it may already have happened",
+    "the step failed unexpectedly", "interrupted by a restart", "failed",
+))
+REASON_NOT_KEPT = "details not kept (privacy mode)"
+_CODE_REASON = re.compile(r"[A-Z][A-Z0-9_]{0,39}")
+
+
+def reason_at_rest(text: str) -> str:
+    """#1557: a stored step reason as privacy mode keeps it: a fixed sentence, or a failure code without its text."""
+    text = text or ""
+    if not text or text in FIXED_REASONS or text == REASON_NOT_KEPT or _CODE_REASON.fullmatch(text):
+        return text
+    code = text.split(": ", 1)[0]
+    return code if _CODE_REASON.fullmatch(code) or code == "failed" else REASON_NOT_KEPT
 
 
 def _at_rest(text: str) -> str:
