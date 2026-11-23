@@ -101,8 +101,9 @@ async def test_voice_confirm_of_an_item_removed_after_the_approval_is_not_found(
     assert (r.ok, r.code) == (False, "PREF_NOT_FOUND")
 
 
+@pytest.mark.parametrize("origin", ["model", "user"])   # review R1: both origins the registry allows
 @pytest.mark.parametrize("approved", [True, False])
-async def test_voice_shown_wording_comes_only_from_the_approval_the_handler_runs_after(home, approved):
+async def test_voice_shown_wording_comes_only_from_the_approval_the_handler_runs_after(home, approved, origin):
     """Review R2: the registry calls approval_meta exactly once per call, only to build the approval it then asks,
     on the same args object the handler gets; a declined approval confirms nothing."""
     p = prefs_mod.Preferences(open_db(home))
@@ -123,7 +124,7 @@ async def test_voice_shown_wording_comes_only_from_the_approval_the_handler_runs
         seen.append(("run", a, len(asked)))
         return await real_handler(a)
     tool.approval_meta, tool.handler = meta_spy, handler_spy
-    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    r = await reg.call("pref_confirm", {"id": pid}, origin=origin)
     assert seen[0][0] == "meta" and seen[0][2] == 0 and len(asked) == 1          # built right before the one ask
     assert asked[0]["details"]["preference"] == seen[0][1]._shown == A        # the words shown = the words bound
     if approved:
