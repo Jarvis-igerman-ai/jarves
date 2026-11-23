@@ -71,7 +71,9 @@ def _base32(text: str) -> bool:
 
 # #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
 # "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
-_KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
+# #1099 review R2: English key words start a word (a letter may not precede them; "_" may: my_api_key)
+_KEY_WORD = (r"(?<![A-Za-z])(?:api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key)|"
+             r"\btokens?\b|"
              r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
@@ -81,12 +83,14 @@ _KEY_VALUE = re.compile(
     # "expired", "rotated" or "well-known" stay allowed
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
     r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}", re.I)
-# An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
-# split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
-# and neither is a camelCase name built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback).
-_KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")
+# An unprefixed key/token is a long run of mixed letters and digits with high character entropy. #1099 review R1: a
+# base64url key is scored whole (separators _ - / dropped), unless every part is word-like: identifiers
+# (test_prefs_1099, my-service-v2), UUIDs, paths. Pure hex (git SHAs) is not a key, and neither is a camelCase name
+# built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback).
+_KEY_TOKEN = re.compile(r"[A-Za-z0-9+=/_-]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
+_WORDY = re.compile(r"[A-Za-z]+|[A-Za-z]{1,4}\d{1,4}")                   # plain words and short tags (v2, sha256)
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
 
 
@@ -94,9 +98,20 @@ def _entropy(s: str) -> float:
     return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
 
 
+def _wordy(part: str) -> bool:
+    return bool(_HEX.fullmatch(part) or _CAMEL.fullmatch(part) or _WORDY.fullmatch(part))
+
+
 def _keylike(text: str) -> bool:
-    return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
-               and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
+    for tok in _KEY_TOKEN.findall(text):
+        parts = [p for p in re.split(r"[/_-]", tok) if p]
+        m = "".join(parts)
+        if len(m) < 20 or (len(parts) > 1 and all(_wordy(p) for p in parts)):
+            continue
+        if (re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
+                and _entropy(m) >= KEY_ENTROPY_BITS):
+            return True
+    return False
 
 
 def looks_sensitive(text: object) -> bool:

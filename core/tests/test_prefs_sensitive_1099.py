@@ -24,6 +24,9 @@ KEYS = [
     "the token for my work github account is abc12345",
     "my openai key is abc12345",
     "Remember aB3xY7qL9mN2pR5tV8wZ1kC4",                                # random mixed case, not camelCase words
+    # #1099 review R1: a base64url key is scored whole, not per short segment between - _ /
+    "remember aB3x-Kq9Z_7mPw2-Lr8T/xY4v",
+    "set openai_api_key: abc",                                          # "_" before the key word still counts
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -53,6 +56,10 @@ PLAIN = [
     "rename handleOAuth2CallbackResponse in the auth module",
     "call getUserPreferences2Async on start",
     "the key is under the mat",
+    # #1099 review R1/R2: word-like separated identifiers stay allowed; key words do not match inside longer words
+    "deploy my-service-v2-deployment-config-sha256 today",
+    "open docs/reports/2026-11-23-intake-1099 later",
+    "play the Rapi Key: Live album",
 ]
 
 
