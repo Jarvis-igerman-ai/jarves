@@ -105,3 +105,18 @@ def test_missing_databases_are_not_created(home):
     r = privacy.set_privacy(_ctx(home), True)
     assert r["scrubbed"] == {"ledger": 0, "plan_steps": 0, "plans": 0, "errors": []}
     assert not (home / "continuity.db").exists() and not (home / "memory.db").exists()
+
+
+def test_no_old_words_stay_in_the_database_files(home):
+    _seed(home)
+    privacy.set_privacy(_ctx(home), True)
+    for f in ("continuity.db", "continuity.db-wal", "memory.db", "memory.db-wal"):     # secure_delete + checkpoint
+        p = home / f
+        assert not p.exists() or b"Dana" not in p.read_bytes(), f
+
+
+def test_an_older_memory_db_without_the_plan_tables_is_not_an_error(home):
+    home.mkdir(parents=True, exist_ok=True)
+    sqlite3.connect(home / "memory.db").execute("CREATE TABLE memories (k TEXT)").connection.close()
+    r = privacy.set_privacy(_ctx(home), True)
+    assert r["scrubbed"] == {"ledger": 0, "plan_steps": 0, "plans": 0, "errors": []}
