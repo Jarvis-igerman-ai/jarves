@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if "--show-scope" in argv:                                   # the #1390 config read: nothing names a command
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)

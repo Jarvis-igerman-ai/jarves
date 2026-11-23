@@ -68,6 +68,28 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 
+# config keys that name a command git runs (#1390). core.hooksPath and core.fsmonitor are not listed: every call
+# overrides both. includeIf is listed because its condition (branch, gitdir) can match only inside a new worktree.
+_RUNS = re.compile(
+    r"(core\.(sshcommand|editor|pager|askpass|gitproxy)|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
+    r"|credential\.(.+\.)?helper|filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
+    r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
+    r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+)")
+_SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
+
+
+def config_commands(cwd: str | Path) -> list[str]:
+    """Keys in the repository's own config that name a command (#1390). That config is shared with every agent
+    through the shared `.git` folder; the owner's global/system config is not checked. A config git cannot read is
+    refused too (fail closed)."""
+    p = subprocess.run(["git", "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
+                       creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), timeout=30)
+    if p.returncode != 0:
+        return [f"(unreadable config: {p.stderr.decode('utf-8', 'replace').strip()[:150]})"]
+    parts = p.stdout.decode("utf-8", "replace").split("\0")
+    keys = [kv.split("\n", 1)[0].lower() for scope, kv in zip(parts[::2], parts[1::2]) if scope in _SHARED_SCOPES]
+    return sorted({k for k in keys if _RUNS.fullmatch(k)})
+
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
@@ -76,8 +98,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
+    JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
+    drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`) makes the call fail before git
+    starts (#1390). Residual: a key written in the moment between that read and git's own read is not seen."""
+    bad = config_commands(cwd)
+    if bad:
+        raise GitError(f"refused: the repository config names a command git would run: {', '.join(bad)[:200]}")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
@@ -94,7 +120,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, GitError):
         return False
 
 
