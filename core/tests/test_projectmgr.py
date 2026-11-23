@@ -1273,9 +1273,9 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
+        forge.push_branch(str(repo), "main", "o/r")                  # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "jarves/p1/../escape")
+        forge.push_branch(str(repo), "jarves/p1/../escape", "o/r")
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):
@@ -1370,3 +1370,68 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
     assert branch not in t["waiting"]
     sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
+
+
+def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_path, monkeypatch):
+    """#1595: agent-written insteadOf/pushInsteadOf, http.proxy, sslVerify=false or a URL-specific sslCAInfo in the
+    shared (or global) git config never redirect or weaken the owner-identity push."""
+    from jarves.projectmgr import forge
+    good, evil = tmp_path / "remotes" / "o" / "r.git", tmp_path / "evil.git"
+    for b in (good, evil):
+        b.parent.mkdir(parents=True, exist_ok=True)
+        sh(tmp_path, "git", "init", "-q", "--bare", str(b))
+    base = (tmp_path / "remotes").as_uri() + "/"
+    monkeypatch.setattr(forge, "PUSH_BASE", base)
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    (repo / "f.txt").write_text("x")
+    sh(repo, "git", "add", "-A")
+    sh(repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i", "--no-verify")
+    sh(repo, "git", "branch", "jarves/p1/t1-a1")
+    sh(repo, "git", "remote", "add", "origin", evil.as_uri())          # origin itself is agent-writable
+    for key in ("insteadOf", "pushInsteadOf"):
+        sh(repo, "git", "config", f"url.{evil.as_uri()}.{key}", base)
+    for k, v in (("http.proxy", "http://127.0.0.1:9"), ("http.sslVerify", "false"),
+                 ("http.https://github.com/.sslCAInfo", str(tmp_path / "evil-ca.pem")),
+                 ("http.https://github.com/.sslVerify", "false")):
+        sh(repo, "git", "config", k, v)
+    home = tmp_path / "home"                                           # a planted GLOBAL rewrite as well
+    (home / ".config" / "git").mkdir(parents=True)
+    for f in (home / ".gitconfig", home / ".config" / "git" / "config"):
+        f.write_text(f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {base}\n\tinsteadOf = {base}\n'
+                     '[http]\n\tsslVerify = false\n\tproxy = http://127.0.0.1:9\n')
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(forge, "gh_cmd", lambda: ["gh"])
+    seen: list = []
+    real_git = forge.gitops.git
+
+    def spy(cwd, *args, **kw):
+        if "push" in args:                                             # what the pushing git sees, same options/env
+            pre = args[:args.index("push")]
+            seen.append(real_git(cwd, *pre, "config", "--list", check=False, env=kw.get("env")).stdout.lower())
+        return real_git(cwd, *args, **kw)
+    monkeypatch.setattr(forge.gitops, "git", spy)
+    forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert seen and not any(k in seen[0] for k in ("insteadof", "remote.origin", "proxy", "sslcainfo",
+                                                    "sslverify=false"))
+    assert "credential.helper=!'gh' auth git-credential" in seen[0] and "http.sslverify=true" in seen[0]
+    assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
+    assert not sh(evil, "git", "branch", "--list").strip()
+    with pytest.raises(forge.ForgeError):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r/../x")    # the slug is checked
+
+
+def test_push_tls_backend_follows_only_the_system_config(monkeypatch):
+    """#1595 (review R4 of #1618): the pinned push drops the system config, so only its own sslBackend value comes back,
+    and only schannel/openssl; nothing is pinned when the system config names none (MSYS2/Cygwin/Linux git)."""
+    from jarves.projectmgr import forge
+
+    class P:
+        def __init__(self, out):
+            self.stdout, self.returncode = out, 0
+    for out, want in (("schannel\n", ["-c", "http.sslBackend=schannel"]), ("openssl", ["-c", "http.sslBackend=openssl"]),
+                      ("", []), ("evil\n", [])):
+        monkeypatch.setattr(forge.gitops, "git", lambda *a, _o=out, **k: P(_o))
+        assert forge._tls_pins(".") == want
