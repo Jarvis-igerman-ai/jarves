@@ -77,7 +77,11 @@ def test_a_merge_driver_named_in_the_shared_config_never_runs(tmp_path):
 @pytest.mark.parametrize("key", ["diff.external", "diff.evil.command", "diff.evil.textconv", "core.sshCommand",
                                  "core.editor", "sequence.editor", "core.pager", "core.askpass", "gpg.program",
                                  "gpg.ssh.program", "credential.helper", "hook.evil.command",
-                                 "trailer.evil.cmd", "mergetool.evil.cmd", "remote.origin.uploadpack"])
+                                 "trailer.evil.cmd", "mergetool.evil.cmd", "remote.origin.uploadpack",
+                                 "gpg.ssh.defaultKeyCommand", "submodule.evil.update", "core.alternateRefsCommand",
+                                 "filter.evil.process", "core.gitProxy", "remote.origin.receivepack",
+                                 "remote.origin.vcs", "difftool.evil.path", "credential.https://x.invalid.helper",
+                                 "gpg.x509.program"])
 def test_other_command_keys_in_the_shared_config_are_refused(tmp_path, key):
     """#1390 other command types: every git call refuses while the shared config names one."""
     repo = _repo(tmp_path)
@@ -109,6 +113,9 @@ def test_the_owners_global_config_and_neutralised_keys_still_work(tmp_path):
                                                       encoding="utf-8")
     _setcfg(repo, "core.hooksPath", str(tmp_path / "hooks"))
     _setcfg(repo, "core.fsmonitor", "false")
+    scope = subprocess.run(["git", "config", "--show-scope", "--get", "filter.evil.clean"], cwd=repo, text=True,
+                           capture_output=True, env=gitops.child_env(), check=True).stdout.split()
+    assert scope == ["global", "cat"]                        # JARVES's own env really loads the planted global file
     assert gitops.git(repo, "status").returncode == 0
     assert gitops.is_repo(str(repo)) and gitops.repo_state(str(repo))["branch"] == "main"
 
@@ -118,3 +125,22 @@ def test_a_repository_that_names_a_command_is_not_a_usable_repo(tmp_path):
     repo = _repo(tmp_path)
     _setcfg(repo, "core.editor", "evil")
     assert gitops.is_repo(str(repo)) is False
+
+
+def test_the_ext_transport_never_runs_a_command(tmp_path):
+    """#1390 review R2: `protocol.ext.allow=always` plus an `ext::` remote runs a command on any transport call."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _setcfg(repo, "protocol.ext.allow", "always")
+    _setcfg(repo, "remote.evil.url", f"ext::sh -c touch% {marker.as_posix()}")
+    subprocess.run(["git", "ls-remote", "evil"], cwd=repo, capture_output=True)
+    assert marker.exists()                                                       # the setup itself runs the command
+    marker.unlink()
+    assert gitops.git(repo, "ls-remote", "evil", check=False).returncode != 0
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("args", [("-C", "elsewhere", "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status")])
+def test_a_call_that_points_git_at_another_folder_is_refused(tmp_path, args):
+    """#1390 review R6: the config check reads `cwd`, so git must not be pointed at another repository."""
+    with pytest.raises(gitops.GitError, match="another folder"):
+        gitops.git(_repo(tmp_path), *args)

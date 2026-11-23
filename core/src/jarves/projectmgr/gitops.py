@@ -74,7 +74,10 @@ _RUNS = re.compile(
     r"(core\.(sshcommand|editor|pager|askpass|gitproxy)|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
     r"|credential\.(.+\.)?helper|filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
     r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
-    r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+)")
+    r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+|gpg\..+\.defaultkeycommand|submodule\..+\.update"
+    r"|core\.alternaterefscommand)")
+# git options that point git at another repository than `cwd`, which config_commands checked
+_ELSEWHERE = ("-C", "--git-dir", "--work-tree")
 _SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
 
 
@@ -100,11 +103,16 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
     drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`) makes the call fail before git
-    starts (#1390). Residual: a key written in the moment between that read and git's own read is not seen."""
+    starts (#1390). Residual: a key written in the moment between that read and git's own read is not seen.
+    `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
+    lead = args[:next((i for i, a in enumerate(args) if not a.startswith("-")), len(args))]
+    if any(a.split("=", 1)[0] in _ELSEWHERE for a in lead):
+        raise GitError("refused: a git call may not point git at another folder than the one checked (#1390)")
     bad = config_commands(cwd)
     if bad:
         raise GitError(f"refused: the repository config names a command git would run: {', '.join(bad)[:200]}")
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "protocol.ext.allow=never"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
