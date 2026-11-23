@@ -192,7 +192,9 @@ class Tool:
     untrusted_output: bool = False     # returns third-party text (mail, calendar): see SkillRegistry.new_turn
     recipient: Callable[[Any], str | None] | None = None   # send tools: who it goes to (first name is spoken aloud)
     # extra approval metadata (SW-V4 F): (validated args) -> {"details": {...}, "typed": bool, "voice": bool} merged
-    # into the approvals request (a WhatsApp send shows name + number + full text; typed at night)
+    # into the approvals request (a WhatsApp send shows name + number + full text; typed at night). It may bind state
+    # onto args (#1514: pref_confirm records the words shown): the registry runs it once per call, on the same args
+    # object the handler then gets, right before the ask, whether or not the confirm callback `accepts_meta`.
     approval_meta: Callable[[Any], dict] | None = None
     # (validated args) -> a refusal, or None: runs BEFORE the owner is asked, so an impossible call is never put to
     # the owner as a question (V4-WA-2: unknown/used WhatsApp draft id)

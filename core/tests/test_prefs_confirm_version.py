@@ -58,14 +58,15 @@ def test_dashboard_confirm_of_an_item_removed_mid_request_is_not_found(dash, mon
     assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": A})[0] == 404
 
 
-def _voice(p, during_ask=None):
+def _voice(p, during_ask=None, accepts_meta=True):
     reg, asked = SkillRegistry(), []
     async def confirm(prompt, **meta):
         asked.append(meta)
         if during_ask:
             during_ask()                                       # the edit lands while the owner reads the popup
         return True
-    confirm.accepts_meta = True
+    if accepts_meta:
+        confirm.accepts_meta = True
     reg.confirm = confirm
     reg.register(prefs_mod.make_skill(p))
     reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
@@ -83,6 +84,19 @@ async def test_voice_confirm_applies_only_to_the_wording_the_approval_showed(hom
     reg, asked = _voice(p)
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
     assert r.ok and asked[0]["details"]["preference"] == B and p.get(pid)["state"] == "confirmed"
+
+
+async def test_voice_confirm_works_through_a_plain_confirm_callback(home):
+    """Review R2: a confirm callback without `accepts_meta` (a plain confirm(prompt)) still gets approval_meta run,
+    so a voice yes is not silently turned into PREF_NOT_SHOWN; the edit race is still refused there."""
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
+    reg, _ = _voice(p, lambda: p.edit(pid, B, by="phone", repropose=True), accepts_meta=False)
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert (r.ok, r.code, p.get(pid)["state"]) == (False, "PREF_CONFLICT", "proposed")
+    reg, _ = _voice(p, accepts_meta=False)
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert r.ok and p.get(pid)["state"] == "confirmed"
 
 
 async def test_voice_confirm_that_was_never_shown_the_wording_confirms_nothing(home):
@@ -161,14 +175,18 @@ const find = (pred) => { let hit = null; renders[renders.length - 1].forEach((r)
 """
 
 
-@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
 @pytest.mark.parametrize("code,reloads", [("PREF_CONFLICT", True), ("PREF_TEXT_REQUIRED", True), ("", False)])
 def test_dashboard_page_reloads_and_explains_a_refused_confirm(code, reloads):
     """Review R3/R4: the Confirm button sends the shown words; a refused confirm reloads the list (new wording) and
     shows the server's message through the catalog (JL.t, Hebrew in locales/parts); other errors stay as before."""
+    node = shutil.which("node")
+    if not node:
+        if os.environ.get("CI"):                               # never a silent skip in CI (review R3)
+            pytest.fail("node is required in CI for the dashboard page test (GitHub runner images ship it)")
+        pytest.skip("node is not installed")
     js = Path(prefs_mod.__file__).parent / "dashboard_static/pillars.js"
     err = "the preference changed meanwhile: reload the page"
-    out = subprocess.run(["node", "-e", PILLARS_HARNESS, str(js), err, code], capture_output=True, text=True,
+    out = subprocess.run([node, "-e", PILLARS_HARNESS, str(js), err, code], capture_output=True, text=True,
                          timeout=30, check=False)
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout)
