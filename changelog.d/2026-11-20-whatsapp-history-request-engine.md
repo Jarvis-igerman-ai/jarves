@@ -1,0 +1,1 @@
+- Added: WhatsApp bridge engine can ask the linked phone for older chat history on demand (whatsmeow BuildHistorySyncRequest, oldest-known message as anchor) and reports when each answer ends (JAR-272, slice 1 of the long-history backfill; not reachable from the API, CLI or dashboard yet; real-phone behaviour UNVERIFIED).

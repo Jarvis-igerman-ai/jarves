@@ -432,10 +432,26 @@ def _budgeted_model_cls():
 _BudgetedModel = None
 
 
-class AgentBrain:
+class LiveName:
+    """The assistant name a brain puts in its instructions. `name` may be a string or a zero-argument callable
+    (the Core passes `lambda: cfg.assistant_name`), so a rename on the dashboard or by voice (identity.py) reaches
+    the next chat turn without a Core restart."""
+    _name: Any = "JARVES"
+
+    @property
+    def name(self) -> str:
+        n = self._name() if callable(self._name) else self._name
+        return str(n or "JARVES")
+
+    @name.setter
+    def name(self, value: Any) -> None:
+        self._name = value
+
+
+class AgentBrain(LiveName):
     connection = "api_key"
 
-    def __init__(self, cfg: AIConfig, registry: SkillRegistry, memory: MemoryStore, name: str = "JARVES",
+    def __init__(self, cfg: AIConfig, registry: SkillRegistry, memory: MemoryStore, name: Any = "JARVES",
                  budget: Budget | None = None, *, model: Any = None) -> None:
         """budget: the Core's shared Budget (None = own Budget on the same persisted counter).
         model: optional SDK Model to wrap instead of the provider default (tests pass agents.testing models)."""

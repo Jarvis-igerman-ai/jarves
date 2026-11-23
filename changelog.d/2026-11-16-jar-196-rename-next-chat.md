@@ -1,0 +1,1 @@
+- Fixed: renaming the assistant (dashboard or voice) now reaches the next text chat at once; before, the chat kept the old name until JARVES restarted (JAR-196).

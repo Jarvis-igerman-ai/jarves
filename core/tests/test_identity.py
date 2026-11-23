@@ -168,3 +168,36 @@ def test_wake_test_apply_writes_where_the_threshold_is_read(home, mem):
     cf2 = home2 / "config.toml"
     cf2.write_text("[voice]\n", encoding="utf-8")
     assert "config.toml" in apply_wake_threshold(home2, Config(), cf2, 0.4) and "0.4" in cf2.read_text()
+
+
+async def test_rename_reaches_the_next_chat_without_restart(home, mem, monkeypatch, tmp_path):
+    """JAR-196: the owner renames him (dashboard or voice) and the NEXT text chat already uses the new name; the
+    brains read the name live from the Core config instead of the copy taken at start."""
+    from agents.testing.model import ScriptedModel, assistant_message
+
+    from jarves.app import make_agent
+    from jarves.chatgpt_auth import ChatGPTAuth
+    from jarves.chatgpt_brain import ChatGPTBrain
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    cfg = Config()
+    cfg.ai.web_search = False
+    ident = Identity(home, cfg, mem)
+    ident.apply_to_config(cfg)                                     # Core start
+    brain = make_agent(cfg, SkillRegistry(), mem, home)
+    brain._inner_model = model = ScriptedModel([[assistant_message("hi")], [assistant_message("hi again")]])
+    assert await brain.reply("what is your name?") == "hi"
+    assert "You are JARVES," in model.calls[0].system_instructions
+
+    ident.set_names("Max", "מקס", by="dashboard")                  # the owner renames him; the Core keeps running
+    brain.reset_conversation()                                     # the next chat
+    assert await brain.reply("what is your name?") == "hi again"
+    sent = model.calls[1].system_instructions
+    assert "You are Max," in sent and "You are JARVES," not in sent
+
+    cfg.ai.connection = "chatgpt"                                  # the ChatGPT sign-in brain follows the same rule
+    gpt = make_agent(cfg, SkillRegistry(), mem, home)
+    assert isinstance(gpt, ChatGPTBrain) and "You are Max," in gpt.instructions()
+    ident.set_names("Rex", by="voice")
+    assert "You are Rex," in gpt.instructions() and gpt.name == "Rex"
+    fixed = ChatGPTBrain(cfg.ai, SkillRegistry(), mem, ChatGPTAuth(tmp_path), "Plain")   # a plain string still works
+    assert fixed.name == "Plain" and "You are Plain," in fixed.instructions()

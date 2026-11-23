@@ -165,3 +165,59 @@ def test_never_inside_greeting_pending_window(lc):
     lc.greeting, lc._first_audio, lc._t_ready = "hi", threading.Event(), 1995.0
     lc._last_activity = 0.0
     assert not lc._idle_stop_due()
+
+
+def _fake_tkinter(errors, root):
+    """A fake tkinter module: Tk() raises TclError(msg) for each queued message, then returns `root`."""
+    import types
+
+    class TclError(Exception):
+        pass
+    tries = []
+
+    def Tk():
+        tries.append(1)
+        if errors:
+            raise TclError(errors.pop(0))
+        return root
+    mod = types.ModuleType("tkinter")
+    mod.Tk, mod.TclError, mod.Canvas, mod.tries = Tk, TclError, (lambda *a, **k: root), tries
+    return mod
+
+
+def test_new_root_retries_only_transient_tcl_init_errors():
+    """#520: shared retry for Windows' transient Tcl init failures (tcl_findLibrary, auto.tcl)."""
+    from jarves import tkutil
+    naps = []
+    mod = _fake_tkinter(['invalid command name "tcl_findLibrary"', "couldn't read file auto.tcl"], "root")
+    assert tkutil.new_root(mod, sleep=naps.append) == "root" and len(mod.tries) == 3 and naps == [0.25, 0.5]
+    mod = _fake_tkinter(["no display name"], "root")
+    with pytest.raises(mod.TclError):                    # a real error is raised at once
+        tkutil.new_root(mod, sleep=naps.append)
+    assert len(mod.tries) == 1
+    mod = _fake_tkinter(["tcl_findLibrary"] * 5, "root")
+    with pytest.raises(mod.TclError):                    # bounded: five attempts, then the error
+        tkutil.new_root(mod, sleep=lambda s: None)
+    assert len(mod.tries) == 5
+
+
+def test_dot_backend_survives_one_transient_tcl_error(monkeypatch):
+    """#520: the dot's own tk.Tk() had no retry and the dot died silently on the transient tcl_findLibrary error
+    the approval popup already retries. Real TkDotBackend._run, fake tkinter: no display, no clock."""
+    import sys
+    from jarves import tkutil
+    calls = []
+
+    class Stub:
+        def __getattr__(self, name):
+            def rec(*a, **k):
+                calls.append(name)
+                return 100
+            return rec
+    fake = _fake_tkinter(['invalid command name "tcl_findLibrary"'], Stub())
+    monkeypatch.setitem(sys.modules, "tkinter", fake)
+    naps = []
+    monkeypatch.setattr(tkutil.time, "sleep", naps.append)
+    indicator.TkDotBackend()._run()
+    assert len(fake.tries) == 2 and naps == [0.25]
+    assert calls[0] == "overrideredirect" and "mainloop" in calls
