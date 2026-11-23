@@ -68,9 +68,35 @@ def _base32(text: str) -> bool:
     return False
 
 
+# #1099: credential words (the plain word "token(s)" alone is not one) and high-entropy key-like runs.
+_CRED_WORD = re.compile(
+    r"\b(?:api[\s_-]?key|access[\s_-]?(?:token|key)|refresh[\s_-]?token|auth[\s_-]?token|secret[\s_-]?key|"
+    r"private[\s_-]?key|client[\s_-]?secret|bearer)s?\b|טוקן|מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+ה(?:סודי|פרטי)",
+    re.I)
+# A 24+ char run mixing upper, lower and digits that switches character class often (random keys switch on ~60% of
+# neighbours; camelCase identifiers such as "HandleUserRequestV2Async" only at word boundaries, ~40%).
+_KEYISH_RUN = re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{24,}={0,2}")
+_KEYISH_SWITCH = 0.5
+
+
+def _cls(c: str) -> int:
+    return 0 if c.islower() else 1 if c.isupper() else 2 if c.isdigit() else 3
+
+
+def _keyish(text: str) -> bool:
+    for m in _KEYISH_RUN.finditer(text):
+        s = m.group().rstrip("=")
+        kinds = [_cls(c) for c in s]
+        switches = sum(a != b for a, b in zip(kinds, kinds[1:])) / (len(s) - 1)
+        if {0, 1, 2} <= set(kinds) and switches >= _KEYISH_SWITCH:
+            return True
+    return False
+
+
 def looks_sensitive(text: str) -> bool:
-    text = text or ""
-    return bool(_SENSITIVE.search(text)) or _base32(text)
+    text = text if isinstance(text, str) else ""
+    return (bool(_SENSITIVE.search(text)) or _base32(text) or bool(_CRED_WORD.search(text))
+            or logs.has_secret(text) or _keyish(text))
 
 
 def normalize(text: str) -> str:
