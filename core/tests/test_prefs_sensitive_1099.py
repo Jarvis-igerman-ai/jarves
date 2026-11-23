@@ -27,6 +27,10 @@ KEYS = [
     # #1099 review R1: a base64url key is scored whole, not per short segment between - _ /
     "remember aB3x-Kq9Z_7mPw2-Lr8T/xY4v",
     "set openai_api_key: abc",                                          # "_" before the key word still counts
+    # #1099 review R3/R4: random mixed-case parts are not words; "_" before "token" still counts
+    "remember AbCdEfGhIjKl-mnopQRst-wxyz12",
+    "set my_token: abc",
+    "github_token=abc",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -60,6 +64,7 @@ PLAIN = [
     "deploy my-service-v2-deployment-config-sha256 today",
     "open docs/reports/2026-11-23-intake-1099 later",
     "play the Rapi Key: Live album",
+    "rename Build_Release_Pipeline_Config_v2 to BuildPipeline",          # Capitalized words stay word-like
 ]
 
 
@@ -98,3 +103,15 @@ def test_dev_task_naming_a_token_is_kept_but_one_carrying_a_key_is_refused(home)
         devmanager.suggest(st, "token refresh", "my token is Zx9fQ2LmB7vT4kRw8YpN3sHd")
     assert len(devmanager.listing(st)) == 1
     st.close()
+
+
+def test_goal_carrying_a_token_is_refused_and_stores_nothing(home):
+    """#1099 review R6: learned goals use the same gate."""
+    from jarves import goals as goals_mod
+    g = goals_mod.Goals(open_db(home))
+    with pytest.raises(ValueError):
+        g.add("set up github", "my github_token=abc")
+    with pytest.raises(ValueError):
+        g.add("deploy", steps=["paste aB3x-Kq9Z_7mPw2-Lr8T/xY4v"])
+    assert g.add("fix token refresh expiry")["title"] == "fix token refresh expiry"
+    assert len(g.list()) == 1

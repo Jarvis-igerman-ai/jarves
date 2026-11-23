@@ -71,9 +71,9 @@ def _base32(text: str) -> bool:
 
 # #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
 # "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
-# #1099 review R2: English key words start a word (a letter may not precede them; "_" may: my_api_key)
-_KEY_WORD = (r"(?<![A-Za-z])(?:api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key)|"
-             r"\btokens?\b|"
+# #1099 review R2/R4: English key words start a word (a letter may not precede them; "_" may: my_api_key, my_token)
+_KEY_WORD = (r"(?<![A-Za-z])(?:api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
+             r"tokens?\b)|"
              r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
@@ -90,7 +90,8 @@ _KEY_VALUE = re.compile(
 _KEY_TOKEN = re.compile(r"[A-Za-z0-9+=/_-]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
-_WORDY = re.compile(r"[A-Za-z]+|[A-Za-z]{1,4}\d{1,4}")                   # plain words and short tags (v2, sha256)
+# plain words (one case or Capitalized: random mixed case such as AbCdEf is not a word, #1099 review R3) and short tags
+_WORDY = re.compile(r"[A-Z]?[a-z]+|[A-Z]+|[A-Za-z]{1,4}\d{1,4}")  # (v2, sha256)
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
 
 
