@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 from pathlib import Path
@@ -1219,8 +1220,13 @@ def test_claim_stage_atomic_guard_against_a_racing_stop(env):
 
 # ------------------------------------------------------------------ GitHub (optional, off/read/write)
 FAKE_GH = textwrap.dedent('''
-    import json, os, sys
+    import json, os, subprocess, sys
     a = sys.argv[1:]
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    url = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True)
+    with open(os.path.join(os.path.dirname(__file__), "gh_calls.jsonl"), "a") as f:
+        f.write(json.dumps({"args": a, "cwd": os.getcwd(), "git_repo": top.returncode == 0,
+                            "origin": url.stdout.strip()}) + "\\n")
     if a[:2] == ["auth", "status"]:
         sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
     if a[:2] == ["issue", "list"]:
@@ -1264,11 +1270,11 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     try:
         st = forge.status(str(repo))
         assert st["signed_in"] and st["repo"] == "o/r"
-        rows = forge.issues(str(repo))
+        rows = forge.issues("o/r")
         assert rows and rows[0]["number"] == 7 and rows[0]["labels"] == ["bug"]
-        url = forge.create_pr(str(repo), "jarves/p1/t1-a1", "main", "title", "body")
+        url = forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "title", "body")
         assert url.endswith("/pull/9")
-        checks = forge.pr_checks(str(repo), "9")
+        checks = forge.pr_checks("o/r", "9")
         assert checks and checks[0]["bucket"] == "pass"
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
@@ -1276,6 +1282,39 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
         forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
         forge.push_branch(str(repo), "jarves/p1/../escape")
+
+
+def test_forge_gh_never_sees_the_project_git_config_1622(fake_gh, tmp_path, monkeypatch):
+    """#1622: gh's own git reads must never see the project's agent-writable config (a planted remote URL), so gh
+    runs with GIT_DIR pinned to a path that can never be a repository, and every repository call names its target
+    with an explicit, checked --repo. Review R1/R3: this holds even when the cwd itself holds a planted repository
+    (no reliance on GIT_CEILING_DIRECTORIES path matching or on a race-free temp folder)."""
+    from jarves.projectmgr import forge
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/attacker/evil.git")   # planted by an agent
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(repo))                      # worst case: cwd is a repo
+    (tmp_path / "signed_in").write_text("1")
+    forge.status(str(repo))
+    first = json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])
+    assert first["origin"] != "https://github.com/attacker/evil.git", first   # before #1622: gh ran in the repo
+    forge.issues("o/r")
+    forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b")
+    forge.pr_checks("o/r", "9")
+    calls = [json.loads(x) for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 4
+    for c in calls:
+        assert not c["git_repo"] and c["origin"] == "", c             # before #1622: gh's git read attacker/evil
+    for c in calls[1:]:
+        assert c["args"][-2:] == ["--repo", "o/r"], c
+    for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", "o/.", "o/-x", ".o/r", "o/r\n", 7,
+                str(repo), "C:\\proj"):
+        with pytest.raises(forge.ForgeError):
+            forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
+    with pytest.raises(forge.ForgeError):                             # review R2: a stale gh(path, ...) caller
+        forge.gh(str(repo), "auth", "status")
+    assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # nothing bad ever ran gh
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):
