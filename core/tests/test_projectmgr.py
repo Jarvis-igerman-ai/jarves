@@ -1441,7 +1441,7 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
                                                     "sslverify=false"))
     # review R2: no system, global, XDG or project file is read; only the command line and the temp repo's own core.*
     bad = [x for x in origins if not x.startswith("command line:")
-           and not (x.split("\t", 1)[0].replace("\\", "/").endswith("/r.git/config")
+           and not (x.split("\t", 1)[0].replace('"', '').replace("\\\\", "/").replace("\\", "/").endswith("/r.git/config")
                     and x.split("\t", 1)[1].split("=")[0] in forge._INIT_KEYS)]
     assert origins and not bad, bad
     assert "credential.helper=!'gh' auth git-credential" in seen[0] and "http.sslverify=true" in seen[0]
@@ -1482,7 +1482,7 @@ def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monke
     real_git = forge.gitops.git
     text = (f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {forge.PUSH_BASE}\n' if planted == "url"
             else '[core "bare core"]\n\tfilemode = true\n' if planted == "spaced"     # review R2 of #1673: one key with
-            else f"[core]\n\t{planted.split('.')[-1]} = {tmp_path / 'evil.sh'}\n")   # a space, not two allowed keys
+            else f"[core]\n\t{planted.split('.')[-1]} = {(tmp_path / "evil.sh").as_posix()}\n")  # one key, not two
 
     side = tmp_path / "side.git"                                       # review R1 of 59b11146: a config the old
     sh(tmp_path, "git", "init", "-q", "--bare", str(side))             # check never read, via .git or commondir
