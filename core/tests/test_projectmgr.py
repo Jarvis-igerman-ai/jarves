@@ -1455,3 +1455,55 @@ def test_push_tls_backend_follows_only_the_system_config(monkeypatch):
                       ("", []), ("evil\n", [])):
         monkeypatch.setattr(forge.gitops, "git", lambda *a, _o=out, **k: P(_o))
         assert forge._tls_pins(".") == want
+
+
+def _push_fixture(tmp_path, monkeypatch, fmt="sha1"):
+    from jarves.projectmgr import forge
+    remotes = tmp_path / "remotes"
+    good, evil = remotes / "o" / "r.git", tmp_path / "evil.git"
+    for b in (good, evil):
+        b.parent.mkdir(parents=True, exist_ok=True)
+        sh(tmp_path, "git", "init", "-q", "--bare", f"--object-format={fmt}", str(b))
+    monkeypatch.setattr(forge, "PUSH_BASE", remotes.as_uri() + "/")
+    monkeypatch.setattr(forge, "gh_cmd", lambda: ["gh"])
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main", f"--object-format={fmt}")
+    (repo / "f.txt").write_text("x")
+    sh(repo, "git", "add", "-A")
+    sh(repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i", "--no-verify")
+    sh(repo, "git", "branch", "jarves/p1/t1-a1")
+    return forge, repo, good, evil
+
+
+def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monkeypatch):
+    """#1595 (review R1 of 308f24df): a same-user process that writes the temp repo's config between init and push
+    (here a pushInsteadOf) makes the push refuse instead of following it."""
+    forge, repo, good, evil = _push_fixture(tmp_path, monkeypatch)
+    real_git = forge.gitops.git
+
+    def spy(cwd, *args, **kw):
+        p = real_git(cwd, *args, **kw)
+        if "init" in args:
+            with open(Path(args[-1]) / "config", "a", encoding="utf-8") as f:
+                f.write(f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {forge.PUSH_BASE}\n')
+        return p
+    monkeypatch.setattr(forge.gitops, "git", spy)
+    with pytest.raises(forge.ForgeError, match="temporary push repository"):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert not sh(evil, "git", "branch", "--list").strip() and not sh(good, "git", "branch", "--list").strip()
+
+
+def test_push_refuses_a_gh_command_with_arguments(tmp_path, monkeypatch):
+    """#1595 (review R3): the credential helper quotes one program; extra elements are refused, not dropped."""
+    forge, repo, _, _ = _push_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(forge, "gh_cmd", lambda: ["wrapper", "gh"])
+    with pytest.raises(forge.ForgeError, match="one program"):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+
+
+def test_push_keeps_a_sha256_repository_format(tmp_path, monkeypatch):
+    """#1595 (review R4): the temp repo takes the project's object format, so a sha256 project pushes."""
+    forge, repo, good, _ = _push_fixture(tmp_path, monkeypatch, fmt="sha256")
+    forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")

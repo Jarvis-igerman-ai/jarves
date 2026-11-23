@@ -99,8 +99,13 @@ def push_branch(path: str, branch: str, slug: str) -> None:
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
+    if len(cmd) != 1:                                                   # review R3: never drop a wrapper's arguments
+        raise ForgeError("the gh credential helper must be one program")
     helper = "!'" + cmd[0].replace("'", "'\\''") + "' auth git-credential"
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
+    fmt = gitops.git(path, "rev-parse", "--show-object-format").stdout.strip() or "sha1"     # review R4
+    if fmt not in ("sha1", "sha256"):
+        raise ForgeError(f"unsupported git object format: {fmt[:20]}")
     objects = (Path(path) / gitops.git(path, "rev-parse", "--git-path", "objects").stdout.strip()).resolve()
     tls = _tls_pins(path)
     with tempfile.TemporaryDirectory(prefix="jarves-push-") as d:
@@ -108,8 +113,14 @@ def push_branch(path: str, branch: str, slug: str) -> None:
         empty.write_bytes(b"")
         env = {"GIT_CONFIG_GLOBAL": str(empty), "GIT_CONFIG_NOSYSTEM": "1",
                **{k: os.environ[k] for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR") if os.environ.get(k)}}
-        gitops.git(d, "init", "-q", "--bare", str(repo), ident=False, env=env)
+        gitops.git(d, "init", "-q", "--bare", f"--object-format={fmt}", str(repo), ident=False, env=env)
         (repo / "objects" / "info" / "alternates").write_bytes(str(objects).encode() + b"\n")   # no CRLF on Windows
+        # review R1: the temp folder is the owner's, but any same-user process can write it. Right before the push
+        # only git init's own keys (core.*, sha256's extensions.objectformat) may be in its config; a small window
+        # between this check and the push remains
+        keys = gitops.git(d, "config", "--file", str(repo / "config"), "--name-only", "--list", env=env).stdout.split()
+        if any(not k.lower().startswith("core.") and k.lower() != "extensions.objectformat" for k in keys):
+            raise ForgeError("the temporary push repository's config was changed; push refused")
         gitops.git(repo, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true",
                    *tls, "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
                    ident=False, env=env)
