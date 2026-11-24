@@ -382,9 +382,9 @@ class Manager(StageEngine):
             return err
         st = forge.status(p["path"])
         mode = p.get("github") or "off"
-        return _res(True, "ok", f"{p['name']}: GitHub {mode}" + (f" ({st['repo']})" if st["repo"] else
-                    " (no github.com remote)") + ("" if st.get("git", True) else f"; {st.get('git_error')}"),
-                    mode=mode, **st)
+        where = (f" ({st['repo']})" if st["repo"] else " (no github.com remote)") if st.get("git", True) else \
+            f"; {st.get('git_error')}"                          # #1722: the remote was not checked without git 2.31
+        return _res(True, "ok", f"{p['name']}: GitHub {mode}{where}", mode=mode, **st)
 
     def runners_info(self, **_) -> dict:
         rows = []

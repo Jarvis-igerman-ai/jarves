@@ -96,6 +96,8 @@ def push_branch(path: str, branch: str) -> None:
     url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
     if not _PUSH_URL.match(url):
         raise ForgeError(f"JARVES pushes only to a github.com origin: {PUSH_URL_FORMS}")
+    if gitops.git(path, "rev-parse", "--is-shallow-repository").stdout.strip() == "true":   # alternates lack it
+        raise ForgeError("JARVES cannot push from a shallow clone: run git fetch --unshallow in the project first")
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
     objects = gitops.git(path, "rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
     with tempfile.TemporaryDirectory(prefix="jarves-push-") as tmp:

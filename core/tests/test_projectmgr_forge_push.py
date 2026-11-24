@@ -101,7 +101,8 @@ def test_a_non_github_origin_is_refused_before_git_runs(tmp_path, home, origin):
 @pytest.mark.parametrize("where", ["dot-git-hooks", "shared-hookspath"])
 def test_no_reference_transaction_hook_runs_on_the_tracking_ref_update(tmp_path, home, where):
     """Review R1 (round 1): update-ref in the project runs `reference-transaction` (git 2.28+) from .git/hooks or a
-    shared core.hooksPath; gitops.git pins core.hooksPath to NO_HOOKS, so neither runs."""
+    shared core.hooksPath; gitops.git pins core.hooksPath to NO_HOOKS, so neither runs. The hook is `#!/bin/sh`
+    (on Windows: Git for Windows' sh); the negative control fails loudly if it never runs there."""
     repo, cmd, marker = _setup(tmp_path)
     hooks = repo / ".git" / "hooks" if where == "dot-git-hooks" else tmp_path / "shared-hooks"
     hooks.mkdir(parents=True, exist_ok=True)
@@ -116,6 +117,22 @@ def test_no_reference_transaction_hook_runs_on_the_tracking_ref_update(tmp_path,
     assert not marker.exists() and _on(home)
     sha = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
     assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
+
+
+@pytest.mark.parametrize("url", [URL, "https://GitHub.com/o/r", "ssh://git@github.com/o/r.git",
+                                 "ssh://git@github.com:22/o/r.git", "git@github.com:o/r.git", "git@GITHUB.COM:o/r"])
+def test_accepted_github_origin_forms(url):
+    """Review round 2 R5: the valid forms stay accepted (the regex alone)."""
+    assert forge._PUSH_URL.match(url)
+
+
+def test_a_shallow_clone_is_refused_with_a_clear_error(tmp_path, home):
+    """Review round 2 R3: the temp repository has no `shallow` file, so git's own error would be unclear."""
+    repo, _, _ = _setup(tmp_path)
+    (repo / ".git" / "shallow").write_bytes((gitops.git(repo, "rev-parse", "HEAD").stdout.strip() + "\n").encode())
+    with pytest.raises(forge.ForgeError, match="shallow clone"):
+        forge.push_branch(str(repo), BRANCH)
+    assert not _on(home)
 
 
 def test_a_failed_tracking_ref_update_does_not_fail_the_push(tmp_path, home, monkeypatch, caplog):

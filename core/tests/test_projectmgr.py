@@ -1298,7 +1298,7 @@ def test_github_status_text_names_the_git_prerequisite(env, monkeypatch):
     monkeypatch.setattr(forge, "status", lambda path: {"git": False, "git_error": "JARVES needs git 2.31 or later "
                                                        "(found: 2.30)", "gh": True, "signed_in": False, "repo": ""})
     g = m.call("github", project="demo")
-    assert g["ok"] and "git 2.31 or later" in g["text"] and g["git"] is False
+    assert g["ok"] and "git 2.31 or later" in g["text"] and g["git"] is False and "remote" not in g["text"]
 
 
 def _rule_matches(rule: str, cmd: str) -> bool:
