@@ -509,6 +509,12 @@ def test_605_rows_hash_counts_only_in_a_tag_signed_by_the_owner_key(tmp_path):
     _sh(r, "git", "update-ref", "refs/tags/v4.1.3", _sh(r, "git", "hash-object", "-t", "tag", "-w", "--stdin",
                                                         data=body.encode()))    # text appended after the signature
     assert "not an owner-signed annotated tag" in check(tag="v4.1.3", h="c" * 64)
+    _sh(r, "git", "update-ref", "refs/tags/v4.1.4", _sh(r, "git", "rev-parse", "refs/tags/v4.1.0"))
+    assert "named 'v4.1.0'" in check(tag="v4.1.4")                              # owner-signed object under another name
+
+    def no_tool(cmd, **k):
+        raise FileNotFoundError(cmd[0])
+    assert "cannot verify the signature" in " ".join(gate.tag_signature_problems(r, "v4.1.0", head, signers, rows, no_tool))
 
 
 def test_605_real_publish_needs_the_environment_signers_list(tmp_path, monkeypatch, capsys):
