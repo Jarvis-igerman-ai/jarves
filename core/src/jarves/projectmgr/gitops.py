@@ -69,10 +69,16 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+# replace refs and the graft file live in the shared repository, writable by agents: with them an agent can swap the
+# content or history behind a commit the owner approved (#1720 review R1). Every JARVES git command ignores both.
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": NO_HOOKS}
+# a config hook's command becomes this: git is always on the PATH git gives its children (review R2, not `true`)
+HOOK_NOOP = "git version"
+
+
 def _run(cwd: str | Path, argv: list[str], timeout: float) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                          creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                          errors="replace")
+                          creationflags=_NOWIN, env=child_env(GIT_ENV), encoding="utf-8", errors="replace")
 
 
 # programs the config can name for signing: a repository-scope value is replaced by the owner's global/system one
@@ -85,12 +91,15 @@ def config_overrides(listing: str) -> list[str]:
     `git config --show-scope --null --list`. Repository scope (`.git/config`, `config.worktree` and files they
     include) is writable by agents; the owner's global and system settings (git-lfs filters, their gpg) are kept,
     also where the repository config names the same filter or program (#1720 review R2). Otherwise a filter loses
-    its commands (content is stored as is), a merge driver becomes a plain conflict, a config hook
-    (`hook.<name>.command`, newer git than CI's 2.43: UNVERIFIED there) runs `true`."""
-    items, trusted, local = listing.split("\0"), {}, []
+    its commands (content is stored as is) and a merge driver becomes a plain conflict. Config hooks
+    (`hook.<name>.*`, newer git than CI's 2.43: UNVERIFIED there) of every scope run HOOK_NOOP, as no hook runs at all
+    (#1381), so a repository-scope `hook.<name>.event` cannot move the owner's hook to another event (review R3)."""
+    items, trusted, local, hooks = listing.split("\0"), {}, [], []
     for scope, entry in zip(items[0::2], items[1::2]):
         key, _, val = entry.partition("\n")
-        if scope in ("global", "system"):
+        if key.startswith("hook.") and key.count(".") >= 2:
+            hooks.append(f"{key.rpartition('.')[0]}.command={HOOK_NOOP}")
+        elif scope in ("global", "system"):
             trusted[key] = val
         else:
             local.append(key)
@@ -103,11 +112,9 @@ def config_overrides(listing: str) -> list[str]:
             out.append(f"filter.{name}.required={trusted.get(f'filter.{name}.required', 'false')}")
         elif sec == "merge" and name:
             out.append(f"merge.{name}.driver={trusted.get(f'merge.{name}.driver', '')}")
-        elif sec == "hook" and name:
-            out.append(f"hook.{name}.command={trusted.get(f'hook.{name}.command', 'true')}")
         elif key in _PROGRAMS:
             out.append(f"{key}={trusted.get(key, _PROGRAMS[key])}")
-    return list(dict.fromkeys(out))
+    return list(dict.fromkeys(out + hooks))
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -119,7 +126,9 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Commands the repository-scope config names (filter and merge drivers, gpg
     programs, config hooks) are overridden per call (#1407, `config_overrides`); diff/log/show run no external diff
-    or textconv. Open: the config is read just before the command, so a write in between is not covered (#1533)."""
+    or textconv; replace refs and grafts are ignored (GIT_ENV). Open: the config is read just before the command, so a
+    write in between is not covered (#1533). If that config read fails, the command does not run and the result (or
+    the GitError with check=True) is the failed `git config --list` call's (review R5)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     p = _run(cwd, [*pre, "config", "--show-scope", "--null", "--list"], timeout)
     if p.returncode == 0:                    # a config git cannot read fails the command too: report that failure
@@ -273,14 +282,14 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

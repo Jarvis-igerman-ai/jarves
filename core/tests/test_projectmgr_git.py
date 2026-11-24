@@ -325,18 +325,37 @@ def test_drivers_and_programs_named_by_the_shared_config_never_run(tmp_path, mon
 
 
 def test_owner_global_filters_are_kept_and_repo_scope_commands_are_overridden(tmp_path, monkeypatch):
-    """#1407: only repository-scope keys are switched off; the owner's global settings (git-lfs filters) stay. A
-    config-defined hook (`hook.<name>.command`, newer git than CI's) is replaced by `true`."""
+    """#1407: only repository-scope keys are switched off; the owner's global settings (git-lfs filters) stay. Config
+    hooks (`hook.<name>.*`, newer git than CI's) of every scope run HOOK_NOOP (review R2/R3)."""
     listing = "\0".join(["global", "filter.lfs.clean\ngit-lfs clean -- %f", "global", "gpg.program\n/usr/bin/gpg2",
                          "system", "filter.lfs.required\ntrue", "local", "filter.lfs.process\nevil",
                          "global", "merge.ours.driver\ntrue", "local", "merge.ours.driver\nevil",
                          "local", "filter.ev.il.clean\nx", "local", "merge.evil.driver\nx", "local", "merge.ff\nfalse",
                          "worktree", "hook.pwn.command\nx", "local", "gpg.program\nx", "local",
-                         "gpg.ssh.defaultkeycommand\nx", "local", "user.name\nA", ""])
+                         "gpg.ssh.defaultkeycommand\nx", "local", "user.name\nA",
+                         "global", "hook.mine.command\nlint", "local", "hook.mine.event\npre-push", ""])
     out = gitops.config_overrides(listing)
     assert "filter.ev.il.clean=" in out and "filter.ev.il.process=" in out and "filter.ev.il.required=false" in out
-    assert "merge.evil.driver=" in out and "hook.pwn.command=true" in out
+    assert "merge.evil.driver=" in out and f"hook.pwn.command={gitops.HOOK_NOOP}" in out
+    assert f"hook.mine.command={gitops.HOOK_NOOP}" in out and not [o for o in out if "lint" in o or ".event" in o]
     assert "gpg.program=/usr/bin/gpg2" in out and "gpg.ssh.defaultkeycommand=" in out
     assert {"filter.lfs.clean=git-lfs clean -- %f", "filter.lfs.process=", "filter.lfs.smudge=",
             "filter.lfs.required=true", "merge.ours.driver=true"} <= set(out)          # review R2: owner's kept
     assert not [o for o in out if o.startswith(("merge.ff", "user."))]
+
+
+def test_git_ignores_replace_refs_and_grafts_from_the_shared_repository(tmp_path):
+    """#1720 review R1: replace refs and `.git/info/grafts` (agent-writable) change what a commit id means to git."""
+    repo = _repo(tmp_path)
+    first = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "late.txt").write_text("late\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "late", "--no-verify")
+    late = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    subprocess.run(["git", "replace", "-f", first, late], cwd=repo, check=True)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{first} {late}\n", encoding="utf-8")
+    assert "late.txt" in subprocess.run(["git", "ls-tree", "--name-only", first], cwd=repo, capture_output=True,
+                                        text=True).stdout                      # plain git: the swapped content
+    assert "late.txt" not in gitops.git(repo, "ls-tree", "--name-only", first).stdout
+    assert gitops.git(repo, "rev-list", "--count", first).stdout.strip() == "1"   # no grafted parent

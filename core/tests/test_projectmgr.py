@@ -619,6 +619,34 @@ def test_ship_approval_names_the_commit_and_merges_only_that_commit(env):
     assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
 
 
+def test_ship_merges_the_approved_commit_even_when_an_agent_adds_a_replace_ref(env):
+    """#1720 review R1: `git replace <tip> <late>` in the shared repository made git merge the replacement's tree and
+    history although rev-parse and the prompt showed the approved commit. No JARVES git call uses replace refs."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = home / "projects" / "1" / "integration"
+    tip = sh(integ, "git", "rev-parse", "HEAD").strip()
+    (repo / "owner.txt").write_text("o\n")                       # the owner's branch moved on: a real merge commit
+    sh(repo, "git", "-c", "user.name=o", "-c", "user.email=o@o", "add", "owner.txt")
+    sh(repo, "git", "-c", "user.name=o", "-c", "user.email=o@o", "commit", "-qm", "owner", "--no-verify")
+
+    def ask(prompt, **kw):                      # the agent swaps what the approved commit points to
+        sh(integ, "git", "checkout", "-q", "-b", "late")
+        (integ / "late.txt").write_text("late\n")
+        sh(integ, "git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
+        sh(integ, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "late", "--no-verify")
+        sh(integ, "git", "replace", tip, sh(integ, "git", "rev-parse", "HEAD").strip())
+        return True
+    m._ask = ask
+    assert m.call("ship_plan", project="demo", apply=True)["ok"]
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+    msg = sh(repo, "git", "--no-replace-objects", "log", "-1", "--format=%s")       # review R4: names the branch
+    assert msg.strip() == f"Merge branch 'jarves/p1/integration' at commit {tip[:12]}"
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)
