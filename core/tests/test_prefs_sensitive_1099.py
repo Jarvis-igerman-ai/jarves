@@ -43,6 +43,7 @@ KEYS = [
     # #1099 review 5 R3: a short spoken value with inner punctuation (dot, comma, colon)
     "my token is ab.cd12ef",
     "the api key is x1,y2z3w",
+    "my token is ab:cd12ef",                                            # review 6 R1: the colon case
     # #1099 review 5 R2 decision: a SHA with six or more digits in a row is refused by the older long-number rule
     "revert 9fceb0212345678598e95dc970b74767f19372d61a",
 ]
@@ -99,6 +100,12 @@ def test_key_and_token_shaped_text_is_sensitive(text):
 @pytest.mark.parametrize("text", PLAIN)
 def test_ordinary_preferences_are_not_sensitive(text):
     assert not prefs_mod.looks_sensitive(text)
+
+
+def test_gate_relies_on_log_token_shapes():
+    """#1099 review 6 R2: looks_sensitive reuses logs.has_secret; pin the shapes the gate expects from it."""
+    for key in ("sk-abcDEFghiJKLmnoPQR", "ghp_abcdefghijklmnopqrstuvwxyz0123456789", "AKIAABCDEFGHIJKLMNOP"):
+        assert prefs_mod.logs.has_secret(key) and prefs_mod.looks_sensitive(key)
 
 
 def test_non_string_input_does_not_crash():

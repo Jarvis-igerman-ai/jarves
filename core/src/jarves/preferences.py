@@ -135,6 +135,7 @@ def _base32(text: str) -> bool:
 def looks_sensitive(text: object) -> bool:
     """Credentials, card/ID numbers, key/token-shaped strings, TOTP seeds, health or money details: never learned."""
     s = "" if text is None else str(text)
+    # logs.has_secret (shared with log redaction) covers prefixed token shapes; test_gate_relies_on_log_token_shapes
     return bool(_SENSITIVE.search(s) or _KEY_VALUE.search(s) or logs.has_secret(s) or _keylike(s) or _base32(s))
 
 
