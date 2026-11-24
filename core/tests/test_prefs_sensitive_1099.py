@@ -31,13 +31,20 @@ KEYS = [
     # #1099 review R2 decision: "keyword: <plain word>" fails closed (a dev task can drop the colon)
     "fix token: refresh expiry",
     "tokens: rotate weekly",
-    # #1099 review 3: camelCase-shaped key with two number chunks; a long random ID inside a share link
     # #1099 review 4 (R2, R3): a bare 4+ digit PIN after "is"; a key word up to five words before SHA-length hex
     "the key is 12345",
     "my token is 4821.",
     "api secret for the staging cluster is 9fceb02d0ae598e95dc970b74767f19372d61af8",
+    # #1099 review 3: camelCase-shaped key with two number chunks; a long random ID inside a share link
     "remember AbcdEfgh12IjklMnop34Qrst",                               # camelCase-shaped, two number chunks
     "open https://docs.google.com/document/d/1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT/edit",
+    # #1099 review 5 R1: camelCase-shaped random string with one number chunk (chunks without a vowel)
+    "remember AbcdEfghIjklMnop1Qrst",
+    # #1099 review 5 R3: a short spoken value with inner punctuation (dot, comma, colon)
+    "my token is ab.cd12ef",
+    "the api key is x1,y2z3w",
+    # #1099 review 5 R2 decision: a SHA with six or more digits in a row is refused by the older long-number rule
+    "revert 9fceb0212345678598e95dc970b74767f19372d61a",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -75,6 +82,12 @@ PLAIN = [
     # #1099 review 3: Hebrew key words are whole words ("יסודי" is no "סוד"); a typical URL is not a key
     "בדיקה יסודית של 9fceb02d0ae598e95dc970b74767f19372d61af8",
     "play https://www.youtube.com/watch?v=dQw4w9WgXcQ in the kitchen",  # typical URL with an 11-character ID is not a key
+    # #1099 review 5 R2: "=" is no part of a key segment, so key=<git SHA> stays a git SHA
+    "open https://example.com/commit?v=9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "lock the build to sha=9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "call parseHttp2ResponseHeaders on start",                     # review 5 R1: abbreviations in a real name
+    # #1099 review 5 R3: a sentence-ending word or a short number after is/was is still no value
+    "the token is valid. see the docs",
 ]
 
 

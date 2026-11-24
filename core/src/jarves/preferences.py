@@ -53,16 +53,19 @@ _KEY_VALUE = re.compile(
     rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword, a bare "key" included) the
     # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, or a bare number of 4+
-    # digits (a PIN), so state words such as "expired", "rotated" or "well-known" stay allowed
+    # digits (a PIN), so state words such as "expired", "rotated" or "well-known" stay allowed. Review 5 R3: inner
+    # punctuation stays part of the value ("ab.cd12ef"); only a trailing . , ; ! ? ends it.
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
-    r"(?:(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}|\d{4,}(?![^\s.,;!?]))", re.I)
+    r"(?:(?=\S*[\d_+/=@#$%*&])\S{5,}[^\s.,;!?]|\d{4,}(?![^\s.,;!?]))", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys, and neither is a camelCase name built from
 # words of 2+ lowercase letters and short numbers (handleOAuth2Callback). Pure hex is judged by _hex_secret instead.
 # Long random IDs inside URLs (share links, capability tokens) are refused on purpose: they often grant access.
-_KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")
+# Review 5 R2: "=" splits segments (it is only base64 padding), so "sha=<git SHA>" is judged as the SHA alone.
+_KEY_SEGMENT = re.compile(r"[A-Za-z0-9+]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
+_CAMEL_WORD = re.compile(r"[A-Z]{0,4}[a-z]{2,}")
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
 
 
@@ -81,8 +84,12 @@ HEX_ENTROPY_BITS = 3.0            # random hex of 32+ chars sits near 3.8; "aaaa
 
 
 def _camel(m: str) -> bool:
-    """A camelCase name: word chunks with at most one short number (review: AbcdEfgh12IjklMn34Opqr is a key)."""
-    return bool(_CAMEL.fullmatch(m)) and len(re.findall(r"\d+", m)) <= 1
+    """A camelCase name: word chunks with at most one short number (review: AbcdEfgh12IjklMn34Opqr is a key), and
+    at least half the word chunks have a vowel after their first letter, as real words do; abbreviations such as
+    Http or Xml are the rest (review 5 R1: AbcdEfghIjklMnop1Qrst is a key)."""
+    words = _CAMEL_WORD.findall(m)
+    return (bool(_CAMEL.fullmatch(m)) and len(re.findall(r"\d+", m)) <= 1
+            and 2 * sum(bool(re.search(r"[aeiouy]", w[1:])) for w in words) >= len(words))
 
 
 def _hex_secret(text: str) -> bool:
