@@ -44,8 +44,9 @@ def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -
     `auth status`). gh never runs inside the project (#1622): its own git reads there (remotes, `url.*.insteadOf`,
     `core.fsmonitor`...) would bypass gitops.git(), and the shared config is agent-writable. It runs in a fresh empty
     folder with GIT_DIR pointing at a missing path, so any git command gh starts finds no repository and reads no
-    repository config, nor the user-global or system git config; the target is always the explicit `--repo=`. gh's
-    own login (GH_CONFIG_DIR / its config folder) is still read: it is the owner's sign-in."""
+    repository config, nor the user-global or system git config; the target is always the explicit `--repo=`
+    (`pr create` runs `git remote -v`, which fails here and gh carries on). Not covered: gh's own config folder
+    (GH_CONFIG_DIR, hosts.yml/config.yml) is still read as the owner's sign-in: #1742."""
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")

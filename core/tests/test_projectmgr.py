@@ -1327,7 +1327,8 @@ def test_gh_never_runs_in_the_project_or_follows_its_config(fake_gh, tmp_path):
 
 
 def test_every_forge_gh_call_targets_the_recorded_repo():
-    """#1622: no caller hands gh the project path (or origin); each repo-taking forge call gets `github_repo`."""
+    """#1622: no caller hands gh the project path (or origin); each repo-taking forge call gets `github_repo`. Callers
+    must reach forge as the plain module name `forge`, so no imported or aliased function can slip past this check."""
     import ast
     import jarves
     src = Path(jarves.__file__).parent
@@ -1336,6 +1337,11 @@ def test_every_forge_gh_call_targets_the_recorded_repo():
         if py.name == "forge.py":
             continue
         for n in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if isinstance(n, ast.ImportFrom):
+                assert not (n.module or "").endswith("forge"), f"{py.name}:{n.lineno} imports names from forge"
+                assert all(a.name != "forge" or a.asname in (None, "forge") for a in n.names), f"{py.name}:{n.lineno}"
+            if isinstance(n, ast.Import):
+                assert all(not a.name.endswith(".forge") for a in n.names), f"{py.name}:{n.lineno}"
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
                     and n.func.value.id == "forge" and n.func.attr in ("status", "issues", "create_pr", "pr_checks")):
                 seen += 1

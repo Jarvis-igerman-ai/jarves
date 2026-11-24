@@ -302,7 +302,8 @@ class Manager(StageEngine):
             counts[t["status"]] = counts.get(t["status"], 0) + 1
         return {"id": p["id"], "name": p["name"], "path": p["path"], "goal": p["goal"], "status": p["status"],
                 "check": p["check_cmd"], "runners": p["runners"], "brief": p["brief"], "counts": counts,
-                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "", "release_cmd": p.get("release_cmd") or [],
+                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "",
+                "release_cmd": p.get("release_cmd") or [],
                 "flow": pl.describe(pl.parse(self._project_flow(p) or pl.DEFAULT_TEMPLATE, trusted=True)),
                 "total": len(ts), "branch": gitops.integration_branch(p["id"])}
 
