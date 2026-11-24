@@ -264,7 +264,7 @@ def confine_available() -> bool:
         why = "not Linux (tracked in #1665)"
         if sys.platform.startswith("linux"):
             try:
-                probe = {"rw": [], "ro": [os.path.dirname(confine.__file__)], "mask": [], "net": False}
+                probe = {"rw": [], "ro": [os.path.dirname(confine.__file__)], "mask": [], "sockets": []}
                 p = subprocess.run(confine.wrap(["true"], probe), capture_output=True, text=True, timeout=30,
                                    stdin=subprocess.DEVNULL, check=False)
                 why = "" if p.returncode == 0 else (p.stderr.strip()[-200:] or f"exit {p.returncode}")
@@ -276,29 +276,28 @@ def confine_available() -> bool:
     return bool(_CONFINE["ok"])
 
 
-def confined(argv: list[str], wt: str | Path, release: bool = False) -> list[str]:
-    """`argv` wrapped so that it can write only its worktree and private temp folders (#1592, confine.py); unchanged
-    where that is unavailable. release: git objects/refs stay writable (a tag) and the network stays on."""
+def confined(argv: list[str], wt: str | Path) -> list[str]:
+    """`argv` wrapped so that it can write only its worktree, reaches no socket, network or process of the owner
+    (#1592, confine.py); unchanged where that is unavailable. A worktree whose git dirs cannot be read (a damaged
+    `.git` pointer) is still confined, only without keeping the shared git dir visible."""
     if not argv or not confine_available():
         return argv
-    out = git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir", "--absolute-git-dir", check=False)
-    dirs = out.stdout.splitlines() if out.returncode == 0 else []
-    if len(dirs) != 2:
-        return argv                               # not a git worktree: there is no shared git dir to protect
-    return confine.wrap(argv, confine.spec(Path(dirs[0]), Path(dirs[1]), Path(wt), git_writes=release, net=release))
+    out = git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+    common = out.stdout.strip() if out.returncode == 0 else ""
+    return confine.wrap(argv, confine.spec(Path(wt), Path(common) if common else None))
 
 
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None,
-              release: bool = False) -> tuple[bool, str]:
+              confined_run: bool = True) -> tuple[bool, str]:
     """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
     env_keep: extra variable names the owner allowed for this command (a release may need a token).
-    On Linux it runs `confined` (#1592): it can write only the worktree (not its `.git` pointer) and private temp
-    folders, without network; release (the owner's release command, which may tag or publish): see `confined`."""
+    On Linux it runs `confined` (#1592): it can write only the worktree (not its `.git` pointer), without network.
+    confined_run=False: the owner's release command, which signs, tags and publishes; not confined (owner decision)."""
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
-        cmd = confined(argv, wt, release)
+        cmd = confined(argv, wt) if confined_run else argv
     except (OSError, subprocess.SubprocessError) as e:        # never run it unconfined where confinement is on
         return False, f"check could not be confined: {e}"
     try:

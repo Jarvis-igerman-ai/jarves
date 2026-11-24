@@ -662,7 +662,7 @@ class StageEngine:
             wt = gitops.detached_worktree(self.home, p["path"], p["id"], sha)
             try:
                 ok, out = gitops.run_check(wt, argv, timeout=3600, env_keep=list(self.cfg.release_env),
-                                                release=True)
+                                                confined_run=False)       # #1592: release scope is the owner's call
             finally:
                 gitops.remove_worktree(p["path"], wt)
         finally:

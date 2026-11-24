@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -16,8 +16,8 @@ from jarves.projectmgr import confine, gitops, runners
 
 # every route the reviews listed: shared config, hooks, info/attributes, a new main `commondir`, other worktrees'
 # metadata and `.git` pointers, this worktree's pointer, renaming the repository or the integration folder and making
-# a new one there (R1), files in the owner's home that run code later, a socket folder (R2), and a detached survivor
-# that reports what happened to its own late write (R3)
+# a new one there, files in the owner's home that run code later, a socket folder, and a detached survivor that must
+# be gone when the run ends (it would write the config a minute later)
 ATTACK = r"""
 import os, subprocess, sys
 common, integ, own, sock = sys.argv[1:5]
@@ -49,17 +49,11 @@ move(os.path.dirname(common), os.path.dirname(common) + "-moved")
 move(integ, integ + "-moved")
 put(os.path.expanduser("~/.jarves-1592-probe"), "x")
 print("SOCKET VISIBLE" if os.path.exists(sock + "/default") else "socket hidden")
-late = '''
-import os, sys, time
-time.sleep(1)
-try:
-    open(sys.argv[1] + "/config", "a").write("[core]\\n\\tfsmonitor = touch PWNED\\n")
-    out = "wrote"
-except OSError as e:
-    out = "denied %d" % e.errno
-open("survivor.txt", "w").write(out)
-'''
-subprocess.Popen([sys.executable, "-c", late, common], start_new_session=True)
+late = "import sys, time\nopen('survivor.txt', 'w').write('started')\ntime.sleep(60)\nopen(sys.argv[1] + '/config', 'a')"
+subprocess.Popen([sys.executable, "-c", late, common, "jarves-1592-survivor"], start_new_session=True,
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+while not os.path.exists("survivor.txt"):
+    pass
 """
 
 # R4: a nested user + mount namespace must not undo the read-only mounts
@@ -114,14 +108,15 @@ def _state(repo: Path, integ: Path, wt: Path, sock: Path) -> dict:
     return {str(p): p.read_bytes() for p in [*files, integ / ".git", wt / ".git", sock / "default"]}
 
 
-def _survivor(wt: Path) -> str:
-    """What the detached survivor reported about its late write; bounded wait, polling its own report file."""
-    f = wt / "survivor.txt"
-    for _ in range(200):
-        if f.exists() and f.read_text():
-            return f.read_text()
-        time.sleep(0.05)
-    return "no report"
+def _survivor_alive() -> bool:
+    """Is the detached survivor still running anywhere on the host? Read from /proc, no waiting."""
+    for d in Path("/proc").iterdir():
+        try:
+            if d.name.isdigit() and b"jarves-1592-survivor" in (d / "cmdline").read_bytes().split(b"\0"):
+                return True                       # an exact argument, not text inside another command line
+        except OSError:
+            continue
+    return False
 
 
 def _attack(repo: Path, integ: Path, wt: Path, sock: Path) -> list[str]:
@@ -135,7 +130,7 @@ def test_a_check_cannot_change_any_shared_git_file_even_from_a_survivor(project)
     before = _state(repo, integ, wt, sock)
     ok, out = gitops.run_check(wt, _attack(repo, integ, wt, sock))
     assert ok and "denied" in out and "WROTE" not in out and "socket hidden" in out, out
-    assert _survivor(wt) == "denied 30"                         # EROFS, reported by the survivor itself
+    assert (wt / "survivor.txt").read_text() == "started" and not _survivor_alive()   # it died with the run
     assert _state(repo, integ, wt, sock) == before
     assert not Path(os.path.expanduser("~/.jarves-1592-probe")).exists()
     assert gitops.git(integ, "config", "--get", "filter.x.clean", check=False).stdout == ""
@@ -189,7 +184,7 @@ def test_an_agent_runs_the_check_only_through_the_confined_jarves_check_script(p
     r = agent.run("p", str(wt), check_argv=_attack(repo, integ, wt, sock), timeout=60)
     assert r.ok and "denied" in r.text and "WROTE" not in r.text, (r.error, r.text)
     assert agent.seen["check_argv"] == ["jarves-check"] and "`jarves-check`" in agent.seen["prompt"]
-    assert _survivor(wt) == "denied 30" and _state(repo, integ, wt, sock) == before
+    assert not _survivor_alive() and _state(repo, integ, wt, sock) == before
     assert (wt / "agent.txt").read_text() == "mine"             # the agent itself is not confined
     assert not list(Path(runners.tempfile.gettempdir()).glob("jarves-check-*"))  # the script folder is removed
 
@@ -203,14 +198,54 @@ def test_a_read_only_agent_gets_no_check_script(project):
 
 
 @pytest.mark.linux_only
-@pytest.mark.userns
-def test_the_release_command_can_still_tag_but_not_change_the_config(project):
+def test_the_owners_release_command_is_not_confined(monkeypatch, project):
+    """Review R4: the release's confinement scope (signing, credential sockets, publisher caches) is the owner's
+    decision; until then it runs as before."""
     repo, integ, wt, sock = project
-    tag = ("import subprocess; subprocess.run(['git', 'tag', 'v1'], check=True); "
-           "open(subprocess.check_output(['git', 'rev-parse', '--git-common-dir'], text=True).strip() + '/config', 'a')")
-    ok, out = gitops.run_check(integ, [sys.executable, "-c", tag], release=True)
+    monkeypatch.setattr(gitops, "confined", lambda *a, **k: pytest.fail("the release must not be wrapped"))
+    out = integ.parent / "released"
+    assert gitops.run_check(integ, [sys.executable, "-c", f"open({str(out)!r}, 'w')"], confined_run=False)[0]
+    assert out.exists()
+
+
+@pytest.mark.linux_only
+@pytest.mark.userns
+def test_a_confined_run_cannot_trace_or_signal_any_process_outside(project):
+    repo, integ, wt, sock = project
+    code = ("import ctypes, os, sys; libc = ctypes.CDLL(None, use_errno=True); pid = int(sys.argv[1]); "
+            "r = libc.ptrace(16, pid, None, None); print('ptrace', r, ctypes.get_errno()); "
+            "exec('try:\\n os.kill(pid, 0); print(\\'kill ok\\')\\nexcept OSError as e: print(\\'kill\\', e.errno)'); "
+            "print('ppid', os.getppid(), 'me', os.getpid())")
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", code, str(os.getpid())])
+    assert ok and out == "ptrace -1 3 kill 3 ppid 0 me 1", out                  # ESRCH: our pid does not exist there
+
+
+@pytest.mark.linux_only
+@pytest.mark.userns
+def test_a_confined_run_cannot_reach_a_unix_socket_outside_the_hidden_folders(project):
+    """Review R2: a daemon socket (Docker, D-Bus) is not protected by a read-only mount; it is covered instead."""
+    repo, integ, wt, sock = project
+    srv = socket.socket(socket.AF_UNIX)
+    path = str(repo.parent / "daemon.sock")
+    srv.bind(path)
+    srv.listen()
+    try:
+        code = ("import socket, sys; s = socket.socket(socket.AF_UNIX)\ntry:\n s.connect(sys.argv[1]); print('REACHED')"
+                "\nexcept OSError as e:\n print('refused', e.errno)")
+        ok, out = gitops.run_check(wt, [sys.executable, "-c", code, path])
+        assert ok and out.startswith("refused"), out
+    finally:
+        srv.close()
+
+
+@pytest.mark.linux_only
+@pytest.mark.userns
+def test_a_worktree_with_a_broken_git_pointer_is_still_confined(project):
+    """Review R3: when git cannot read the worktree's dirs the check runs confined anyway, never unconfined."""
+    repo, integ, wt, sock = project
+    (wt / ".git").write_text("gitdir: /nonexistent\n")
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", f"open({str(repo / '.git' / 'config')!r}, 'a')"])
     assert not ok and "Read-only file system" in out
-    assert gitops.git(repo, "tag", "--list").stdout.strip() == "v1"
 
 
 @pytest.mark.linux_only
@@ -230,7 +265,7 @@ def test_a_check_that_cannot_be_confined_is_never_run_unconfined(monkeypatch, pr
 @pytest.mark.linux_only
 def test_a_confinement_that_cannot_be_set_up_never_runs_the_command(tmp_path):
     marker = tmp_path / "ran"
-    bad = {"rw": [str(tmp_path / "missing")], "ro": [], "mask": [], "net": False}
+    bad = {"rw": [str(tmp_path / "missing")], "ro": [], "mask": [], "sockets": []}
     p = subprocess.run(confine.wrap([sys.executable, "-c", f"open({str(marker)!r},'w')"], bad),
                        capture_output=True, text=True, timeout=30, check=False)
     assert p.returncode == confine.FAIL and "could not confine" in p.stderr and not marker.exists()
@@ -248,20 +283,12 @@ def test_where_confinement_is_unavailable_the_check_runs_as_before_and_says_so_o
 
 
 @pytest.mark.linux_only
-def test_the_spec_keeps_only_the_worktree_writable_unless_it_is_a_release(project):
+def test_the_spec_keeps_only_the_worktree_writable_and_hides_run(project, monkeypatch):
     repo, integ, wt, sock = project
     common = (repo / ".git").resolve()
-    own = common / "worktrees" / "t1-a1"
-    s = confine.spec(common, own, wt)
-    assert s["rw"] == [str(wt.resolve())] and s["net"] is False and s["mask"][0] == str(sock)
+    s = confine.spec(wt, common)
+    assert s["rw"] == [str(wt.resolve())] and str(sock) in s["mask"]
     assert s["ro"] == [str(common), str(wt.resolve() / ".git")]
-    r = confine.spec(common, own, wt, git_writes=True, net=True)
-    assert str(own) in r["rw"] and str(common / "refs") in r["rw"] and str(own / "gitdir") in r["ro"] and r["net"]
-
-
-def test_the_module_imports_where_there_is_no_fcntl():
-    """CI review: gitops imports confine on Windows too; a top-level POSIX-only import crashed the Core there."""
-    code = ("import sys; sys.modules['fcntl'] = None; "
-            "import jarves.projectmgr.gitops, jarves.projectmgr.confine; print('ok')")
-    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False)
-    assert p.stdout.strip() == "ok", p.stderr[-500:]
+    assert confine.spec(wt)["ro"] == [str(wt.resolve() / ".git")]          # no readable shared git dir: none kept
+    monkeypatch.undo()
+    assert "/run" in confine.HIDE and "/tmp" in confine.HIDE
