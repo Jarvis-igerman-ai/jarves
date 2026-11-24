@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.metadata
 import shutil
 import sys
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -28,6 +29,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import all_pages_check as apc  # noqa: E402
 
 NO_POLL = "window.setInterval = () => 0;"
+# #1735: the load sends TWO visible beats (DOMContentLoaded and the page's own refresh); the page renders on one while
+# the other may still be in flight and rewrite the marker AFTER a later hidden beat (CI: marker 0.09 s past the
+# baseline instead of 75 s). Count the page's own /api/approvals GETs from the call (before the browser's cache lock
+# can hold one back) until their response arrives; the server writes the marker before it answers.
+INFLIGHT = """(() => { window.__apInflight = 0; const f = window.fetch;
+  window.fetch = function (u, o) { const beat = /^\\/api\\/approvals(\\?|$)/.test(String(u)) && !(o && o.method);
+    if (!beat) return f.apply(this, arguments);
+    window.__apInflight++; const done = () => { window.__apInflight--; };
+    return f.apply(this, arguments).then((r) => { done(); return r; }, (e) => { done(); throw e; }); }; })();"""
+# regression repro: the FIRST load beat gets a distinct URL (?n=1, ignored by the server), so the browser cannot hold
+# the second identical GET behind it and the server can hold the first one back (slow_first_beat)
+TAG_FIRST = """(() => { let tagged = false; const f = window.fetch;
+  window.fetch = function (u, o) { if (!tagged && String(u) === "/api/approvals") { tagged = true; u = u + "?n=1"; }
+    return f.call(this, u, o); }; })();"""
 SET_HIDDEN = """(h) => { Object.defineProperty(document, 'hidden', {configurable: true, get: () => h});
   Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => h ? 'hidden' : 'visible'});
   document.dispatchEvent(new Event('visibilitychange')); }"""
@@ -66,18 +81,22 @@ def browser():
             b.close()
 
 
-def _open(browser, dash, home):  # noqa: F811
+def _open(browser, dash, home, init: str = ""):  # noqa: F811
     ctx = browser.new_context()
     urls: list[str] = []
     ctx.on("request", lambda r: urls.append(r.url))
     scripts: list = []                                       # the approvals.js response the page itself ran
     ctx.on("response", lambda r: scripts.append(r) if urlsplit(r.url).path.endswith("/approvals.js") else None)
     ctx.add_init_script(NO_POLL)
+    if init:
+        ctx.add_init_script(init)                            # runs before INFLIGHT: INFLIGHT wraps it
+    ctx.add_init_script(INFLIGHT)
     p = ctx.new_page()
     p.goto(dash.url + "#/approvals")
     p.wait_for_function("() => document.getElementById('apPage') && !document.querySelector('#apPage .muted')",
                         timeout=30000)
     assert any("/api/approvals" in u for u in urls) and not _hidden_beats(urls)
+    p.wait_for_function("() => window.__apInflight === 0", timeout=30000)   # #1735: every load beat has landed
     base = _marker_mtime(home)                               # written by the load's visible beat: the baseline
     p.loaded_js = scripts[0].text() if scripts else ""
     return ctx, p, urls, base
@@ -138,6 +157,51 @@ def test_tab_going_hidden_sends_a_hidden_beat_at_once(tab, home):
     assert _marker_mtime(home) - base > appr.DASHBOARD_FRESH_S     # baseline-relative: no wall-clock read
     with p.expect_request(lambda r: r.url.endswith("/api/approvals"), timeout=5000):    # shown again: catch up (#159)
         p.evaluate(SET_HIDDEN, False)
+
+
+@pytest.fixture
+def slow_first_beat(dash, monkeypatch):  # noqa: F811  (dash first: it registers the routes)
+    """#1735 repro of the CI order: the server holds the first load beat (?n=1) until a hidden beat was handled, then
+    lets it rewrite the marker before the hidden response returns. Each wait is bounded at 5 s: a fixed _open waits
+    for that beat before any hidden beat exists, so it only costs the bound. Returns the handled ?n=1 count."""
+    i = next(i for i, (m, rx, _) in enumerate(dashboard._ROUTES) if m == "GET" and rx.match("/api/approvals"))
+    method, rx, handler = dashboard._ROUTES[i]
+    seen = {"n": 0}
+    hidden_done, first_done = threading.Event(), threading.Event()
+
+    def slow(ctx, m, body, q=None):
+        q = q or {}
+        if (q.get("hidden") or [""])[0] == "1":
+            out = handler(ctx, m, body, q)
+            hidden_done.set()
+            first_done.wait(5.0)
+            return out
+        if (q.get("n") or [""])[0] != "1":
+            return handler(ctx, m, body, q)
+        seen["n"] += 1
+        hidden_done.wait(5.0)
+        try:
+            return handler(ctx, m, body, q)
+        finally:
+            first_done.set()
+    routes = list(dashboard._ROUTES)
+    routes[i] = (method, rx, slow)
+    monkeypatch.setattr(dashboard, "_ROUTES", routes)
+    return seen
+
+
+def test_a_late_load_beat_cannot_overwrite_the_hidden_beat(slow_first_beat, browser, dash, home):  # noqa: F811
+    # #1735: before the fix _open took the baseline while a load beat was still in flight; it then landed after the
+    # hidden beat (test_tab_going_hidden_sends_a_hidden_beat_at_once:138 failed with the marker 0.09 s past the baseline)
+    ctx, p, _, base = _open(browser, dash, home, TAG_FIRST)
+    try:
+        with p.expect_request(lambda r: "/api/approvals?hidden=1" in r.url, timeout=10000) as beat:
+            p.evaluate(SET_HIDDEN, True)
+        beat.value.response()
+        assert slow_first_beat["n"] == 1                     # the repro really held a load beat
+        assert _marker_mtime(home) - base > appr.DASHBOARD_FRESH_S
+    finally:
+        ctx.close()
 
 
 @pytest.mark.parametrize("pagehide_first", [True, False], ids=["pagehide_first", "visibility_first"])
