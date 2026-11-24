@@ -30,6 +30,14 @@ def dash(home):
     ctx.close()
 
 
+@pytest.fixture
+def prefs(home):
+    """Review R1 (#1701): the voice tests share one DB handle that is closed afterwards, so no SQLite handle leaks."""
+    db = open_db(home)
+    yield prefs_mod.Preferences(db)
+    db.close()
+
+
 def test_dashboard_confirm_of_old_wording_after_an_edit_is_refused(dash):
     ctx, p, pid = dash
     p.edit(pid, B, by="phone", repropose=True)                 # the edit commits while the page still shows A
@@ -73,8 +81,8 @@ def _voice(p, during_ask=None, accepts_meta=True):
     return reg, asked
 
 
-async def test_voice_confirm_applies_only_to_the_wording_the_approval_showed(home):
-    p = prefs_mod.Preferences(open_db(home))
+async def test_voice_confirm_applies_only_to_the_wording_the_approval_showed(prefs):
+    p = prefs
     pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
     reg, asked = _voice(p, lambda: p.edit(pid, B, by="phone", repropose=True))
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
@@ -86,10 +94,10 @@ async def test_voice_confirm_applies_only_to_the_wording_the_approval_showed(hom
     assert r.ok and asked[0]["details"]["preference"] == B and p.get(pid)["state"] == "confirmed"
 
 
-async def test_voice_confirm_through_a_plain_confirm_callback_shows_the_exact_wording(home):
+async def test_voice_confirm_through_a_plain_confirm_callback_shows_the_exact_wording(prefs):
     """Review (gpt blocker): a confirm callback without `accepts_meta` gets only the prompt, so the prompt itself must
     carry the exact words being confirmed; the edit race is still refused, and a normal yes confirms what was asked."""
-    p = prefs_mod.Preferences(open_db(home))
+    p = prefs
     pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
     reg, asked = _voice(p, lambda: p.edit(pid, B, by="phone", repropose=True), accepts_meta=False)
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
@@ -102,16 +110,16 @@ async def test_voice_confirm_through_a_plain_confirm_callback_shows_the_exact_wo
     assert r.ok and p.get(pid)["state"] == "confirmed" and p.get(pid)["text"] == B
 
 
-async def test_voice_confirm_that_was_never_shown_the_wording_confirms_nothing(home):
-    p = prefs_mod.Preferences(open_db(home))
+async def test_voice_confirm_that_was_never_shown_the_wording_confirms_nothing(prefs):
+    p = prefs
     pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
     tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
     r = await tool.handler(tool.args(id=pid))                  # no approval ran, so no wording was shown
     assert (r.ok, r.code) == (False, "PREF_NOT_SHOWN") and p.get(pid)["state"] == "proposed"
 
 
-async def test_voice_confirm_of_an_item_removed_after_the_approval_is_not_found(home):
-    p = prefs_mod.Preferences(open_db(home))
+async def test_voice_confirm_of_an_item_removed_after_the_approval_is_not_found(prefs):
+    p = prefs
     pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
     reg, _ = _voice(p, lambda: p.remove(pid))
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
@@ -120,10 +128,10 @@ async def test_voice_confirm_of_an_item_removed_after_the_approval_is_not_found(
 
 @pytest.mark.parametrize("origin", ["model", "user"])   # review R1: both origins the registry allows
 @pytest.mark.parametrize("approved", [True, False])
-async def test_voice_shown_wording_comes_only_from_the_approval_the_handler_runs_after(home, approved, origin):
+async def test_voice_shown_wording_comes_only_from_the_approval_the_handler_runs_after(prefs, approved, origin):
     """Review R2: the registry calls approval_meta exactly once per call, only to build the approval it then asks,
     on the same args object the handler gets; a declined approval confirms nothing."""
-    p = prefs_mod.Preferences(open_db(home))
+    p = prefs
     pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
     reg, asked = _voice(p)
     if not approved:
