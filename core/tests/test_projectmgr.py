@@ -1330,6 +1330,7 @@ def test_every_forge_gh_call_targets_the_recorded_repo():
     """#1622: no caller hands gh the project path (or origin); each repo-taking forge call gets `github_repo`. Callers
     must reach forge as the plain module name `forge`, so no imported or aliased function can slip past this check."""
     import ast
+    import re
     import jarves
     src = Path(jarves.__file__).parent
     seen = 0
@@ -1345,8 +1346,22 @@ def test_every_forge_gh_call_targets_the_recorded_repo():
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
                     and n.func.value.id == "forge" and n.func.attr in ("status", "issues", "create_pr", "pr_checks")):
                 seen += 1
-                assert n.args and "github_repo" in ast.unparse(n.args[0]), f"{py.name}:{n.lineno}"
+                arg = ast.unparse(n.args[0]) if n.args else ""   # exactly the record, never `... or p["path"]`
+                assert re.fullmatch(r"\w+\['github_repo'\]|\w+\.get\('github_repo'\) or ''", arg), f"{py.name}:{n.lineno}"
     assert seen >= 1
+
+
+def test_gh_temp_folder_cleanup_error_does_not_lose_the_result(fake_gh, tmp_path, monkeypatch):
+    """#1622 follow-up: on Windows gh may still hold its temp folder at exit; that must not fail a created PR."""
+    from jarves.projectmgr import forge
+    real = shutil.rmtree
+
+    def locked(path, *a, **kw):
+        if "jarves-gh-" in str(path) and not kw.get("ignore_errors"):
+            raise PermissionError(32, "in use", str(path))
+        return real(path, *a, **kw)
+    monkeypatch.setattr(shutil, "rmtree", locked)
+    assert forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b").endswith("/pull/9")
 
 
 def test_github_status_uses_the_recorded_repo_not_todays_origin(env, fake_gh):

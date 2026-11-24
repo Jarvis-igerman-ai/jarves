@@ -52,7 +52,8 @@ def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
     if repo and not valid_repo(repo):
         raise ForgeError("not an owner/repo name")
-    with tempfile.TemporaryDirectory(prefix="jarves-gh-") as box:
+    box = tempfile.mkdtemp(prefix="jarves-gh-")
+    try:
         env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
                                 "GIT_DIR": os.path.join(box, "no-repo"), "GIT_CEILING_DIRECTORIES": box,
                                 "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
@@ -63,6 +64,8 @@ def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -
         p = subprocess.run([*cmd, *args, *([f"--repo={repo}"] if repo else [])], cwd=box, capture_output=True,
                            text=True, timeout=timeout, env=env, creationflags=_NOWIN, input=input_,
                            encoding="utf-8", errors="replace")
+    finally:   # best effort: on Windows gh (or a git it started) may still hold the folder; a leftover empty temp
+        shutil.rmtree(box, ignore_errors=True)   # folder must not turn a done `pr create` into an error (no lost URL)
     if p.returncode != 0:
         raise ForgeError(" ".join((p.stderr or p.stdout or "gh failed").split())[:300])
     return p.stdout
