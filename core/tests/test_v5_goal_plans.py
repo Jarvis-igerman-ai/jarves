@@ -864,3 +864,26 @@ async def test_1526_done_plan_in_privacy_mode_leaves_nothing_to_scrub(env, monke
     await env.runner.tick()
     d = env.store.get(p["id"])
     assert d["state"] == "done" and d["result"] == "1/2 steps done." and env.store.scrub_private() == 0
+
+
+async def test_1526_block_with_privacy_flipping_mid_write_is_rescanned(env, monkeypatch):
+    """R1: privacy off when _block stores the raw reason, on again before _stop_plan: the next tick must rescan."""
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()                                                   # a scrub covers the current count
+    flips = iter([False])                                                     # the first read (in _block) sees off
+    monkeypatch.setattr(gp.logs, "privacy", lambda: next(flips, True))
+    p = env.store.propose("go", steps(("fake_read", {"text": "x"})))
+    env.store.approve(p["id"])
+    step = env.store.get(p["id"])["steps"][0]
+    env.store.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (p["id"],))
+    env.runner._block(p["id"], step, "tool says: hunter2")
+    assert "hunter2" in _all_text(env)                                        # the raw text did reach the step error
+    await env.runner.tick()
+    assert "hunter2" not in _all_text(env)
+
+
+def test_1526_empty_plain_text_is_not_counted(monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
+    n = gp._PLAIN[0]
+    assert gp._at_rest("") == "" and gp._PLAIN[0] == n                         # R4: nothing to scrub, no rescan
+    assert gp._at_rest("x") == "x" and gp._PLAIN[0] == n + 1

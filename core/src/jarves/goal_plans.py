@@ -74,10 +74,19 @@ _PLAIN = [0]       # #1526: counts tool text written with privacy off; a change 
 
 def _at_rest(text: str) -> str:
     """#206 F13: tool output (evidence, error text) is stored on disk; in privacy mode keep the status and code only."""
+    return _keep(text, lambda _t: "")
+
+
+def _keep(text: object, reduce) -> str:
+    """#1526: ONE privacy read decides each stored text: reduced while privacy is on, else stored as is AND counted in
+    _PLAIN, so the next privacy-on tick rescans. Never split the check from the count (a flip between two reads
+    would leave unscrubbed text that no counter change reports)."""
+    t = str(text or "")
     if logs.privacy():
-        return ""
-    _PLAIN[0] += 1
-    return text
+        return reduce(t)
+    if t:
+        _PLAIN[0] += 1
+    return t
 
 
 # #1526: the fixed reasons this module writes into a step's error / a plan's note. The scrub keeps only these, a
@@ -369,11 +378,13 @@ class PlanStore:
         c.execute("BEGIN IMMEDIATE")
         try:
             n = 0
-            for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps").fetchall():
+            for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps "     # rows with no text are skipped
+                               "WHERE COALESCE(evidence,'')<>'' OR COALESCE(error,'')<>''").fetchall():
                 if r["evidence"] or r["error"] != _private_text(r["error"]):
                     c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (_private_text(r["error"]), r["id"]))
                     n += 1
-            for r in c.execute("SELECT id, result, note FROM goal_plans").fetchall():
+            for r in c.execute("SELECT id, result, note FROM goal_plans "
+                               "WHERE COALESCE(result,'')<>'' OR COALESCE(note,'')<>''").fetchall():
                 new = (_private_result(r["result"]), _private_note(r["note"]))
                 if new != (r["result"] or "", r["note"] or ""):
                     c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (*new, r["id"]))
@@ -532,10 +543,7 @@ class PlanRunner:
         self._stop = True
 
     def _stop_plan(self, pid: int, state: str, note: str, **extra) -> None:
-        if logs.privacy():
-            note = _private_note(note)                # #1526: "step N: <reason>" as the scrub keeps it
-        else:
-            _PLAIN[0] += 1                            # this note and the step error before it may quote a tool
+        note = _keep(note, _private_note)            # #1526: "step N: <reason>" as the scrub keeps it
         if not self.store._set_if(pid, ("running",), state, note=_short(note, 200), **extra):
             return                                   # the owner paused/cancelled meanwhile: that wins (#813)
         logs.info("goals", "PLAN_STOPPED", "plan stopped", id=pid, state=state)
@@ -660,13 +668,12 @@ class PlanRunner:
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
-        why = _private_text(why) if logs.privacy() else why      # #1526: same reduction as _fail
+        why = _keep(why, _private_text)              # #1526: same reduction (and count) as _fail
         self.store.db.x("UPDATE goal_plan_steps SET status='blocked', error=? WHERE id=?", (_short(why, 200), step["id"]))
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
-        if logs.privacy():
-            why = _private_text(why)                  # #1526: a new write equals what the scrub keeps
+        why = _keep(why, _private_text)              # #1526: a new write equals what the scrub keeps
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
@@ -679,10 +686,7 @@ class PlanRunner:
         lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
         text = _short("; ".join(lines), RESULT_CHARS)
         done = sum(1 for s in steps if s["status"] == "done")
-        if logs.privacy():
-            result = f"{done}/{len(steps)} steps done."          # #1526: what the scrub keeps
-        else:
-            result, _PLAIN[0] = f"{done}/{len(steps)} steps done. {text}", _PLAIN[0] + 1
+        result = _keep(f"{done}/{len(steps)} steps done. {text}", _private_result)   # #1526: what the scrub keeps
         if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="", result=result):
             return st.get(pid)                       # cancelled/paused meanwhile (#813)
         logs.info("goals", "PLAN_DONE", "plan done", id=pid, count=done)
