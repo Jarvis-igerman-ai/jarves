@@ -130,9 +130,14 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
             return {}
+        owner = raw.get("owner")
+        owner = {k for k in owner if isinstance(k, str)} if isinstance(owner, list) else set()
+
+        def limit(k: str) -> float:  # #1416: only an owner window (unlocked, up to 1 week) lives past a login's 12 h
+            return now + (max(SESSION_TTL_S, unlock.UNLOCK_TTL_S) if k in owner else SESSION_TTL_S)
         return {k: float(v) for k, v in rows.items()
                 if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{64}", k) and isinstance(v, (int, float))
-                and now < float(v) <= now + max(SESSION_TTL_S, unlock.UNLOCK_TTL_S)}  # unlocked windows live 1 week (#1416)
+                and now < float(v) <= limit(k)}
     except (OSError, ValueError, TypeError):
         return {}
 
@@ -147,7 +152,7 @@ def load_owner_windows(home: Path, live: dict[str, float]) -> set[str]:
     return {k for k in rows if isinstance(k, str) and k in live} if isinstance(rows, list) else set()
 
 
-def save_sessions(home: Path, digests: dict[str, float], owner: list[str] | None = None) -> None:
+def save_sessions(home: Path, digests: dict[str, float], owner: list[str]) -> None:
     """Atomic owner-only write of session digests (never the session id or the access token)."""
     private_directory(Path(home))
     path = Path(home) / "sessions.json"
@@ -155,7 +160,7 @@ def save_sessions(home: Path, digests: dict[str, float], owner: list[str] | None
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     owner_only_file(tmp)  # before writing; the ACL moves with the file on replace (#824)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "sessions": digests, "owner": owner or []}, f)
+        json.dump({"version": 1, "sessions": digests, "owner": owner}, f)
     os.replace(tmp, path)
 
 
@@ -215,11 +220,17 @@ class Server(ThreadingHTTPServer):
         self.restored = {k: end for k, end in self.restored.items() if end > now}
         digests = dict(self.restored)
         digests.update({session_key(self.token, s): end for s, end in self.sessions.items()})
-        self.owner_windows &= digests.keys()
+        self.prune_owner_windows(now)
         try:
             save_sessions(self.home, digests, sorted(self.owner_windows))
         except OSError:
             pass  # persistence is a convenience; the live session still works in memory
+
+    def prune_owner_windows(self, now: float) -> None:
+        """Keep only owner windows whose session is still live (#1416). Caller holds session_lock."""
+        live = {k for k, end in self.restored.items() if end > now}
+        live.update(session_key(self.token, s) for s, end in self.sessions.items() if end > now)
+        self.owner_windows &= live
 
     def server_close(self) -> None:
         self.stopping.set()
@@ -511,6 +522,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.unlock_wrong.salt != salt:
                 self.server.unlock_wrong = UnlockWrong(salt)
             wrong = self.server.unlock_wrong
+            self.server.prune_owner_windows(now)  # an ended owner window must not keep the code live
             owner = session_key(self.server.token, session) in self.server.owner_windows
             if not owner and wrong.total >= UNLOCK_WRONG_TOTAL:
                 # #1416: token-only windows used the shared tries; the code stays live for the owner's window.

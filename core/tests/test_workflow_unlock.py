@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -235,15 +236,12 @@ class UnlockTests(unittest.TestCase):
 
     def test_owner_window_survives_a_restart_1416(self):
         owner, shown, wrong = self.owner_window_then_new_code()
-        self.tearDown_server_only()
-        self.server = Server(self.home, 0)                              # restart: same home, sessions.json reloaded
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
+        self.restart()
         self.assertEqual(len(self.server.owner_windows), 1)
         self.token_windows_try(wrong)
         self.cookie = f"{self.server.cookie}={owner}"
         self.assertEqual(self.wrong_try(shown), (200, None))
-        self.assertGreater(self.server.sessions[owner], __import__("time").time() + 7 * 86400 - 60)  # end was stored
+        self.assertGreater(self.server.sessions[owner], time.time() + 7 * 86400 - 60)  # end was stored
 
     def test_damaged_owner_list_means_no_owner_window_1416(self):
         from jarves.workflow.server import load_owner_windows
@@ -255,10 +253,37 @@ class UnlockTests(unittest.TestCase):
             self.assertEqual(load_owner_windows(self.home, {"f" * 64: 1.0} if bad == "nope" else {}), set(), bad)
         self.assertTrue(sid)
 
-    def tearDown_server_only(self):
+    def test_damaged_owner_list_after_a_restart_keeps_the_old_cancel_1416(self):
+        owner, shown, wrong = self.owner_window_then_new_code()
+        stored = json.loads((self.home / "sessions.json").read_text(encoding="utf-8"))
+        stored["owner"] = {"damaged": True}
+        (self.home / "sessions.json").write_text(json.dumps(stored), encoding="utf-8")
+        self.restart()
+        self.assertEqual(self.server.owner_windows, set())
+        self.token_windows_try(wrong)
+        self.assertFalse((self.home / unlock.FILE).exists())          # no owner window: cancelled at the shared 5
+
+    def test_expired_owner_window_does_not_keep_the_code_live_1416(self):
+        owner, shown, wrong = self.owner_window_then_new_code()
+        windows = []
+        for _ in range(2):                                             # the token windows log in first (a login saves)
+            self.cookie = ""
+            self.login()
+            windows.append(self.cookie)
+        self.server.sessions[owner] = time.time() - 1                  # then its session ends in memory, not yet saved
+        for cookie, n in zip(windows, (3, 2)):
+            self.cookie = cookie
+            self.assertEqual([self.wrong_try(wrong)[0] for _ in range(n)], [403] * n)
+        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled at the shared 5, as before #1416
+
+    def restart(self):
+        """Stop the server and start a new one on the same home (sessions.json is reloaded)."""
         self.server.shutdown()
         self.thread.join(5)
         self.server.server_close()
+        self.server = Server(self.home, 0)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
 
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()

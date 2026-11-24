@@ -54,7 +54,7 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_TIGHTENED", set())
     tok = server.access_token(tmp_path)
     assert server.access_token(tmp_path) == tok
-    server.save_sessions(tmp_path, {})
+    server.save_sessions(tmp_path, {}, [])
     names = [p.name for p in seen]
     assert names.count("access.token") == 2  # created, then existing file tightened once
     assert any(n.startswith("sessions.") for n in names)  # the temp file, locked before it is written

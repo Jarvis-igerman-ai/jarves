@@ -56,6 +56,6 @@ def test_access_token_and_sessions_are_owner_only_after_creation(tmp_path, monke
     monkeypatch.setattr(server, "_TIGHTENED", set())
     home = tmp_path / "workflow"
     server.access_token(home)
-    server.save_sessions(home, {})
+    server.save_sessions(home, {}, [])
     _assert_owner_only(home / "access.token")
     _assert_owner_only(home / "sessions.json")
