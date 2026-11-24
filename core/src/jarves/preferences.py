@@ -383,7 +383,7 @@ def make_skill(prefs: Preferences):
                 a._shown = str(r["text"])[:MAX_TEXT]    # #1514: the confirm below applies only to these words
                 # the prompt carries them too: a confirm callback without `accepts_meta` shows only the prompt
                 return {"details": {"preference": a._shown},
-                        "prompt": f'לזכור את ההעדפה "{a._shown}"? / Remember this preference: "{a._shown}"?'}
+                        "prompt": f'לזכור את ההעדפה? / Remember this preference? "{a._shown}"'}   # words once
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",

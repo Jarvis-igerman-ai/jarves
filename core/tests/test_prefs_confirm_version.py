@@ -94,6 +94,7 @@ async def test_voice_confirm_through_a_plain_confirm_callback_shows_the_exact_wo
     reg, asked = _voice(p, lambda: p.edit(pid, B, by="phone", repropose=True), accepts_meta=False)
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
     assert asked == [{"prompt": asked[0]["prompt"]}] and f'"{A}"' in asked[0]["prompt"]   # only the prompt arrived
+    assert asked[0]["prompt"].count(A) == 1                                    # review R1: read out once, not twice
     assert (r.ok, r.code, p.get(pid)["state"]) == (False, "PREF_CONFLICT", "proposed")
     reg, asked = _voice(p, accepts_meta=False)
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")

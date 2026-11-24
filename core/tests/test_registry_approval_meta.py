@@ -81,3 +81,31 @@ async def test_approval_meta_prompt_replaces_the_confirm_prompt_only_when_it_is_
 
     reg.confirm = confirm
     assert (await reg.call("test_prompt", {"value": 1})).ok and asked == [expected]
+
+
+async def test_approval_meta_prompt_never_adds_an_ask_to_a_tool_without_one():
+    """Review R2: a tool with no confirm prompt is not asked, whatever approval_meta would return."""
+    asked, ran = [], []
+
+    async def handle(_a):
+        ran.append(1)
+        return ToolResult(True, "done")
+
+    tool = Tool("test_no_ask", "Test no ask", handle, args=Args, permission="action",
+                approval_meta=lambda a: {"prompt": "Approve?"})
+
+    class TestSkill(Skill):
+        name = "test_no_ask_skill"
+
+        def tools(self):
+            return [tool]
+
+    reg = SkillRegistry(allowed_actions={tool.name})
+    reg.register(TestSkill())
+
+    async def confirm(prompt):
+        asked.append(prompt)
+        return True
+
+    reg.confirm = confirm
+    assert (await reg.call("test_no_ask", {"value": 1})).ok and asked == [] and ran == [1]
