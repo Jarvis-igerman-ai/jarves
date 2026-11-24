@@ -96,6 +96,8 @@ def test_diff_drivers_and_external_diff_named_in_the_shared_config_never_run(tmp
     _cfg(repo, "diff.evil.command", _sh(marker, "true"))
     _cfg(repo, "diff.external", _sh(marker, "true"))
     assert "+new" in gitops.git(repo, "diff", "HEAD~1", "HEAD").stdout
+    assert "+new" in gitops.git(repo, "show", "HEAD").stdout                     # review R4: show and log -p too
+    assert "+new" in gitops.git(repo, "log", "-p", "-1").stdout
     assert not marker.exists()
 
 
@@ -132,3 +134,57 @@ def test_editors_named_in_the_shared_config_never_run(tmp_path):
     marker.unlink()
     gitops.git(repo, "commit", "--amend", "--no-verify")
     assert not marker.exists()
+
+
+def test_submodules_are_never_recursed_into(tmp_path):
+    """Review R1: `submodule.recurse=true` in the shared config makes checkout recurse into a submodule, whose own
+    config (`.git/modules/<s>/config`, agent-writable) is never read, so its filter would run. JARVES never recurses."""
+    (tmp_path / "s").mkdir()
+    sub, marker = _repo(tmp_path / "s"), tmp_path / "ran.txt"
+    repo = _repo(tmp_path)
+    file_ok = ["-c", "protocol.file.allow=always"]
+    subprocess.run(["git", *file_ok, "submodule", "add", "-q", str(sub), "sub"], cwd=repo, check=True)
+    gitops.git(repo, "commit", "-qm", "sub", "--no-verify")
+    old = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (sub / "f.txt").write_text("v2\n", encoding="utf-8")
+    gitops.git(sub, "commit", "-qam", "v2", "--no-verify")
+    subprocess.run(["git", "-C", "sub", "pull", "-q", "--no-rebase", "origin", "main"], cwd=repo, check=True,
+                   capture_output=True)
+    gitops.git(repo, "commit", "-qam", "sub v2", "--no-verify")
+    mod = repo / ".git" / "modules" / "sub"
+    _cfg(repo, "filter.evil.smudge", _sh(marker), file=str(mod / "config"))
+    (mod / "info").mkdir(exist_ok=True)
+    (mod / "info" / "attributes").write_text("* filter=evil\n", encoding="utf-8")
+    _cfg(repo, "submodule.recurse", "true")
+    subprocess.run(["git", "checkout", "-q", old], cwd=repo, check=True, env=gitops.child_env())
+    assert marker.exists()                                                         # the setup itself works
+    marker.unlink()
+    gitops.git(repo, "checkout", "-q", "main")
+    assert not marker.exists()
+
+
+def test_a_shared_filter_with_the_owners_filter_name_fails_closed(tmp_path, _owner_home):
+    """Review R3: blanking a filter the owner's config also defines (Git LFS) would silently commit binaries
+    instead of pointers; JARVES refuses with a message instead."""
+    repo = _repo(tmp_path)
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write('[filter "lfs"]\n\tsmudge = git-lfs smudge %f\n')
+    _cfg(repo, "filter.lfs.required", "true")
+    with pytest.raises(gitops.GitError, match="redefines your filter 'lfs'"):
+        gitops.git(repo, "status")
+
+
+def test_global_options_before_the_subcommand_are_refused(tmp_path):
+    """Review R4: the config is read in `cwd`; `-C` or `--git-dir` would run git in another repository."""
+    repo = _repo(tmp_path)
+    for args in (("-C", str(tmp_path), "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status")):
+        with pytest.raises(gitops.GitError, match="subcommand first"):
+            gitops.git(repo, *args)
+
+
+def test_a_git_without_show_scope_names_the_minimum_version(monkeypatch, tmp_path):
+    """Review R5: git before 2.26 rejects --show-scope (exit 129); the error says which git JARVES needs."""
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda argv, **kw: subprocess.CompletedProcess(argv, 129, "", "error: unknown option"))
+    with pytest.raises(gitops.GitError, match=r"git 2\.26 or later"):
+        gitops.git(tmp_path, "status")

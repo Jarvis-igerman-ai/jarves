@@ -79,31 +79,48 @@ _SHARED_SCOPES = ("local", "worktree")      # the repository's own config: agent
 def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
     """Command-scope overrides (GIT_CONFIG_COUNT/KEY/VALUE env: any subsection name, `=` included, is safe) that
     blank every driver command the repository's shared config names, include.path/includeIf files included (#1390).
-    A blank filter is a pass-through (required=false), a blank merge driver fails the merge (it conflicts), a blank
-    diff driver fails the command, so git() adds --no-ext-diff --no-textconv to its own `git diff` calls. The system and global config (the owner's own, e.g. Git LFS) stay as they are unless the
-    shared config names the same driver. Fails closed: an unreadable shared config raises GitError. Residual: a key
-    an agent adds between this read and the command itself is not seen (one read per call)."""
+    A blank filter is a pass-through (required=false); a blank merge driver fails the merge (it conflicts, so a
+    local `merge.<x>.driver`, even a harmless one, now always aborts merge_in); a blank diff driver fails the
+    command, so git() adds --no-ext-diff --no-textconv to its own diff/show/log calls. The system and global config
+    (the owner's own) stay as they are. A filter the shared config names that the owner's config also defines (Git
+    LFS after `git lfs install --local`) raises GitError: a silent pass-through would commit binaries instead of
+    pointers. Fails closed: an unreadable shared config raises GitError. Residual: a key an agent adds between this
+    read and the command itself is not seen (one read per call); a submodule's own config is never read, so
+    git() never recurses into submodules (submodule.recurse=false)."""
     p = subprocess.run(["git", "config", "--show-scope", "-z", "--get-regexp", r"^(filter|merge|diff)\."],
                        cwd=str(cwd), capture_output=True, text=True, timeout=30, creationflags=_NOWIN,
                        env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8", errors="replace")
     if p.returncode not in (0, 1):                                        # 1: no key matched (or not a repository)
-        raise GitError(("cannot read the shared git config: " + (p.stderr or "").strip())[:300])
+        hint = " (JARVES needs git 2.26 or later)" if p.returncode == 129 else ""   # 129: --show-scope unknown
+        raise GitError(f"cannot read the shared git config{hint}: {(p.stderr or '').strip()}"[:300])
     parts = (p.stdout or "").split("\0")
     keys: dict[str, str] = {}
+    owner_filters: set[str] = set()
     for scope, entry in zip(parts[0::2], parts[1::2]):
         key = entry.split("\n", 1)[0]
         m = _DRIVER_KEY.match(key)
-        if scope not in _SHARED_SCOPES or not m:
+        if not m:
             continue
-        if m.group(2) is not None:                                        # every command of that filter, not one
+        if scope not in _SHARED_SCOPES:
+            if m.group(2) is not None:
+                owner_filters.add(m.group(2))
+        elif m.group(2) is not None:                                      # every command of that filter, not one
             keys.update({f"filter.{m.group(2)}.{k}": "" for k in ("clean", "smudge", "process")})
             keys[f"filter.{m.group(2)}.required"] = "false"
         else:
             keys[key] = ""
+    clash = sorted(owner_filters & {k.split(".", 1)[1].rsplit(".", 1)[0] for k in keys if k.startswith("filter.")})
+    if clash:
+        raise GitError(f"the repository's own git config redefines your filter {clash[0]!r}; JARVES will not run "
+                       "git here (remove the repository-level filter keys, e.g. `git config --local "
+                       f"--remove-section filter.{clash[0]}`)"[:300])
     env = {"GIT_CONFIG_COUNT": str(len(keys))} if keys else {}
     for i, (k, v) in enumerate(keys.items()):
         env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
     return env
+
+
+_GLOBAL_OPTS = ("-C", "--git-dir", "--work-tree", "--namespace", "-c", "--config-env")
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -114,13 +131,18 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Commands named in the shared config by filter/merge/diff drivers are
-    blanked (#1390, see shared_config_overrides); the editors are `:`. Not covered: gpg.program, core.sshCommand,
-    credential helpers and config-defined hooks (`hook.<name>.command`, newer git)."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    blanked (#1390, see shared_config_overrides); the editors are `:`; submodules are never recursed into. `args`
+    must start with the subcommand: a global option (-C, --git-dir, ...) would run git in another repository than
+    the one whose config was read. Not covered: gpg.program, core.sshCommand, credential helpers, config-defined
+    hooks (`hook.<name>.command`, newer git) and a key added between the config read and the command."""
+    if args and args[0].split("=", 1)[0] in _GLOBAL_OPTS:
+        raise GitError(f"git() takes the subcommand first, not the global option {args[0].split('=', 1)[0]}")
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "submodule.recurse=false"]
     env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":",
                      **shared_config_overrides(cwd)})
-    if args[:1] == ("diff",):          # a blank diff driver fails the diff; these flags show the plain text instead
-        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
+    if args[:1] in (("diff",), ("show",), ("log",)):   # a blank diff driver fails these; the flags show plain text
+        args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
