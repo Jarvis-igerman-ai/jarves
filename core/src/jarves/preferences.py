@@ -96,6 +96,9 @@ _COMMIT_CTX = re.compile(r"\b(?:commit|sha1?|revert|cherry-pick|bisect)\W*$", re
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
 _WORDY = re.compile(r"[A-Z]?[a-z]+|[A-Z]+|[A-Za-z]{1,4}\d{1,4}")  # plain words and short tags (v2, sha256)
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
+NODIGIT_KEY_LEN = 24
+NODIGIT_ENTROPY_BITS = 4.0
+_SEGMENT = re.compile(r"[A-Z]+[a-z]*|[a-z]+")
 
 
 def _entropy(s: str) -> float:
@@ -119,6 +122,11 @@ def _keylike(text: str) -> bool:
             continue
         if (re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
                 and _entropy(m) >= KEY_ENTROPY_BITS):
+            return True
+        # #1099 review R4: a 24+ char mixed-case run without a digit is a key when its case segments are random
+        # (about 2 letters each; words in names such as ThisIsMySong average 3+) and its entropy is high
+        if (len(m) >= NODIGIT_KEY_LEN and re.search(r"[a-z]", m) and re.search(r"[A-Z]", m)
+                and len(m) / max(1, len(_SEGMENT.findall(m))) < 3 and _entropy(m) >= NODIGIT_ENTROPY_BITS):
             return True
     return False
 

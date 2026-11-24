@@ -46,6 +46,11 @@ KEYS = [
     # review of #1711 R2: "my ... key/token/secret is X" refuses any 6+ char value, digits or not
     "my api key is hunterfoobar",
     "my token is qwertyuiop",
+    # review of #1711 (92905966) R1: a bare known token shape, caught only by the shared leak check
+    "use sk-abcDEFghiJKLmnoPQR here",
+    # review of #1711 (92905966) R4: a 24+ char random mixed-case run without a digit
+    "remember QxWvTzKpLmNbRgHsYfDjCuEa",
+    "paste kWqZrTxVbNmLpHgFdSaJyUeI/oPc",
     "הטוקן שלי הוא abcdefgh",
 ]
 PLAIN = [
@@ -78,6 +83,8 @@ PLAIN = [
     "private keynote: monday",
     "my favourite token is the blue one",                                # possessive, short value: not a key
     "the api key is hunterfoobar",                                       # not possessive: digit rule still applies
+    "ThisIsMyFavouriteSongEverWritten on repeat",                        # 24+ mixed case, but camelCase words
+    "the McDonaldsHappyMealToysCollection",
 ]
 
 
@@ -92,9 +99,9 @@ def test_ordinary_preferences_are_not_sensitive(text):
 
 
 def test_known_token_shapes_come_from_the_shared_leak_check():
-    """Review of #1690 R4: the sk-... case has no digit, so only logs.has_secret catches it; pin that dependency."""
+    """Review of #1690 R4 / #1711 R1-R2: known token shapes come from logs.has_secret, end to end."""
     assert logs.has_secret("sk-abcDEFghiJKLmnoPQR")
-    assert prefs_mod._keylike("my key is sk-abcDEFghiJKLmnoPQR") is False
+    assert prefs_mod.looks_sensitive("use sk-abcDEFghiJKLmnoPQR here") is True
 
 
 def test_non_string_input_does_not_crash():
