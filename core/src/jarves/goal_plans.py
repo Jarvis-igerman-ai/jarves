@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sqlite3
 import time
 import unicodedata
 
@@ -94,6 +95,12 @@ _OWN = frozenset({
 _CAP = re.compile(r"time cap of \d+ min reached|cost cap of \d+ AI requests reached")
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{2,39}")
 _STEP = re.compile(r"(step \d+): (.*)", re.S)
+
+
+def _result_text(steps) -> str:
+    """A done plan's result; ONE builder for _finish and the #1526 scrub (evidence is '' in privacy mode)."""
+    lines = _short("; ".join(f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps), RESULT_CHARS)
+    return f"{sum(1 for s in steps if s['status'] == 'done')}/{len(steps)} steps done. {lines}"
 
 
 def _private_error(text: object) -> str:
@@ -341,24 +348,27 @@ class PlanStore:
             logs.warn("goals", "PLAN_RECOVERED", "running plans paused after a restart", count=n)
         return n
 
-    def scrub_private(self) -> int:
+    def scrub_private(self, busy_s: float = 0.5) -> int:
         """#1526: privacy mode keeps no tool text, also in rows written before it was on. ONE transaction over the two
-        plan tables (rolled back whole on any error); secure_delete zeroes the old cell bytes, then is restored. A done
-        plan's result is rebuilt as privacy mode writes it (`N. tool: status`). Returns the rows changed."""
-        with self.db._lock:
-            c = self.db._db
-            was = c.execute("PRAGMA secure_delete").fetchone()[0]
+        plan tables (rolled back whole on any error) on its OWN short-lived connection with secure_delete on: the shared
+        connection's lock is never held, so the event loop never waits on it, and a writer elsewhere makes BEGIN fail
+        after `busy_s` into the runner's backoff. A done plan's result is rebuilt as privacy mode writes it. Returns the
+        rows changed. An in-memory database has no file to scrub (0)."""
+        if self.db.path == ":memory:":
+            return 0
+        c = sqlite3.connect(self.db.path, timeout=busy_s)
+        try:
+            c.row_factory = sqlite3.Row
             c.execute("PRAGMA secure_delete=ON")
+            c.execute("BEGIN IMMEDIATE")
             try:
-                c.execute("BEGIN IMMEDIATE")
-                try:
-                    n = self._scrub_rows(c)
-                    c.commit()
-                except BaseException:
-                    c.rollback()
-                    raise
-            finally:
-                c.execute(f"PRAGMA secure_delete={int(was)}")
+                n = self._scrub_rows(c)
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+        finally:
+            c.close()
         return n
 
     @staticmethod
@@ -369,11 +379,8 @@ class PlanStore:
             if new != (r["evidence"] or "", r["error"] or ""):
                 n += c.execute("UPDATE goal_plan_steps SET evidence=?, error=? WHERE id=?", (*new, r["id"])).rowcount
         for r in c.execute("SELECT id, result, note FROM goal_plans").fetchall():
-            result = ""
-            if r["result"]:
-                ss = c.execute("SELECT idx, tool, status FROM goal_plan_steps WHERE plan_id=? ORDER BY idx", (r["id"],)).fetchall()
-                lines = _short("; ".join(f"{s['idx'] + 1}. {s['tool']}: {s['status']}" for s in ss), RESULT_CHARS)
-                result = f"{sum(s['status'] == 'done' for s in ss)}/{len(ss)} steps done. {lines}"
+            result = _result_text(c.execute("SELECT idx, tool, status, evidence FROM goal_plan_steps WHERE plan_id=? "
+                                            "ORDER BY idx", (r["id"],)).fetchall()) if r["result"] else ""
             new = (result, _private_note(r["note"]))
             if new != (r["result"] or "", r["note"] or ""):
                 n += c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (*new, r["id"])).rowcount
@@ -477,6 +484,8 @@ class PlanRunner:
             self._scrub_task.seen = seen
 
     def _scrub_done(self, t: asyncio.Future) -> None:
+        if t.cancelled():
+            return
         e = t.exception()
         if e is None:
             self._scrubbed, self._wait, self._warned = t.seen, 0.0, False
@@ -505,14 +514,20 @@ class PlanRunner:
         return n
 
     async def run(self, poll_s: float = 2.0) -> None:
-        while not self._stop:
-            try:
-                await self.tick()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logs.error("goals", "PLAN_TICK_FAILED", "plan executor tick failed", exc=True)
-            await self._sleep(poll_s)
+        try:
+            while not self._stop:
+                try:
+                    await self.tick()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logs.error("goals", "PLAN_TICK_FAILED", "plan executor tick failed", exc=True)
+                await self._sleep(poll_s)
+        finally:                                        # #1526: stop or cancel waits for a running scrub and collects it
+            t, self._scrub_task = self._scrub_task, None
+            if t is not None:
+                await asyncio.gather(t, return_exceptions=True)
+                self._scrub_done(t)
 
     def stop(self) -> None:
         self._stop = True
@@ -655,11 +670,8 @@ class PlanRunner:
     def _finish(self, pid: int) -> dict:
         st = self.store
         steps = st.steps(pid)
-        lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
-        text = _short("; ".join(lines), RESULT_CHARS)
         done = sum(1 for s in steps if s["status"] == "done")
-        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="",
-                          result=f"{done}/{len(steps)} steps done. {text}"):
+        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="", result=_result_text(steps)):
             return st.get(pid)                       # cancelled/paused meanwhile (#813)
         logs.info("goals", "PLAN_DONE", "plan done", id=pid, count=done)
         return st.get(pid)

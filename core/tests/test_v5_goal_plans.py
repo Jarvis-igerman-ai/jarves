@@ -772,7 +772,7 @@ async def test_1526_r4_failed_update_rolls_back_the_whole_scrub(env, monkeypatch
     import sqlite3
     await _old_text_plans(env, monkeypatch)
     before = _all_text(env)
-    env.db.x("CREATE TEMP TRIGGER no_plan_upd BEFORE UPDATE ON goal_plans BEGIN SELECT RAISE(ABORT, 'boom'); END")
+    env.db.x("CREATE TRIGGER no_plan_upd BEFORE UPDATE ON goal_plans BEGIN SELECT RAISE(ABORT, 'boom'); END")
     with pytest.raises(sqlite3.IntegrityError):
         env.store.scrub_private()                                               # steps were updated first, then this
     assert _all_text(env) == before
@@ -784,3 +784,50 @@ async def test_1526_scrub_restores_secure_delete(env):
     env.db.x("PRAGMA secure_delete=OFF")
     env.store.scrub_private()
     assert env.db._db.execute("PRAGMA secure_delete").fetchone()[0] == 0
+
+
+async def test_1526_review_r1_scrub_never_takes_the_shared_lock_and_fails_fast(env, monkeypatch):
+    import sqlite3
+    await _old_text_plans(env, monkeypatch)
+    lock, env.db._lock = env.db._lock, None                                   # the loop's lock: never touched
+    blocker = sqlite3.connect(env.db.path)
+    blocker.execute("BEGIN IMMEDIATE")                                        # another writer holds the write lock
+    with pytest.raises(sqlite3.OperationalError):
+        env.store.scrub_private(busy_s=0)                                     # fails into the runner's backoff
+    blocker.rollback()
+    blocker.close()
+    assert env.store.scrub_private() == 4
+    env.db._lock = lock
+    assert "secret-a" not in _all_text(env)
+
+
+async def test_1526_review_r2_stopping_the_runner_collects_a_running_scrub(env, monkeypatch):
+    import threading
+    go = threading.Event()
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    monkeypatch.setattr(env.store, "scrub_private", lambda: go.wait(5) and 3)
+
+    async def sleep(_s):
+        await asyncio.sleep(0)
+    env.runner._sleep = sleep
+    task = asyncio.ensure_future(env.runner.run())
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert env.runner._scrub_task is not None and not env.runner._scrub_task.done()
+    task.cancel()
+    go.set()
+    await asyncio.gather(task, return_exceptions=True)
+    assert env.runner._scrub_task is None and env.runner._scrubbed == gp._PLAIN[0]   # awaited and collected
+
+
+async def test_1526_review_r3_scrub_result_matches_finish_for_a_long_plan(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    p = env.store.propose("long", steps(*[("fake_read", {"text": str(i)}) for i in range(gp.MAX_STEPS)]))
+    env.store.approve(p["id"])
+    env.store.skip(p["id"], 3)
+    await env.runner.tick()
+    before = env.store.get(p["id"])["result"]
+    assert before.startswith(f"{gp.MAX_STEPS - 1}/{gp.MAX_STEPS} steps done. 1. fake_read: done") and "4. fake_read: skipped" in before
+    assert env.store.scrub_private() == 0 and env.store.get(p["id"])["result"] == before
+    cut = gp._result_text([{"idx": i, "tool": "t" * 90, "status": "done", "evidence": ""} for i in range(12)])
+    assert len(cut) - len("12/12 steps done. ") == gp.RESULT_CHARS and cut.endswith("…")   # same cap as _finish
