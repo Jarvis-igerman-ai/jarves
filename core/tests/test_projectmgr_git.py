@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if argv[1:3] == list(gitops.NO_REPLACE):              # #1727 R1: on the reads too; not the command's
+            argv = [argv[0], *argv[3:]]
         if argv[1:3] == ["config", "--show-scope"]:          # the #1390 shared-config read: not the command itself
             return subprocess.CompletedProcess(argv, 1, "", "")
         if argv[1:] == ["version"]:                           # the #1390 git version check

@@ -259,7 +259,7 @@ def test_a_git_older_than_2_31_is_refused(monkeypatch, tmp_path):
     monkeypatch.setattr(gitops.subprocess, "run", run)
     with pytest.raises(gitops.GitError, match=r"git 2\.31 or later \(found: 2\.30\)"):
         gitops.git(tmp_path, "status")
-    assert calls == [["git", "version"]]                                           # nothing else ran
+    assert calls == [["git", *gitops.NO_REPLACE, "version"]]                                           # nothing else ran
 
 
 def test_signing_programs_named_in_the_shared_config_never_run(tmp_path, _owner_home):
@@ -300,7 +300,43 @@ def test_git_ignores_replace_refs_and_grafts_from_the_shared_repository(tmp_path
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "x"], cwd=repo, check=True)
     other = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
     subprocess.run(["git", "replace", base, other], cwd=repo, check=True)
+    _cfg(repo, "core.useReplaceRefs", "true")       # git 2.31-2.41 let this local key beat GIT_NO_REPLACE_OBJECTS
     assert gitops.git(repo, "show", f"{base}:f.txt").stdout == "base\n"
     (repo / ".git" / "info").mkdir(exist_ok=True)
     (repo / ".git" / "info" / "grafts").write_text(f"{other}\n", encoding="utf-8")      # `other` has no parent now
     assert gitops.git(repo, "rev-list", "--count", other).stdout.strip() == "2"
+
+
+def test_every_git_call_pins_replace_refs_off_at_command_scope(monkeypatch, tmp_path):
+    """#1727 review R1: on git 2.31-2.41 a shared `core.useReplaceRefs=true` re-enabled replace refs despite
+    GIT_NO_REPLACE_OBJECTS (CI's 2.43 cannot show it). `-c core.useReplaceRefs=false` beats the local config on every
+    version, so each JARVES git process, config reads included, carries it."""
+    repo, real, argvs = _repo(tmp_path), subprocess.run, []
+
+    def run(argv, **kw):
+        argvs.append(argv)
+        return real(argv, **kw)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    gitops.git(repo, "status")
+    assert argvs and all("core.useReplaceRefs=false" in a for a in argvs), argvs
+
+
+def test_a_shared_ssh_default_key_command_never_runs(tmp_path):
+    """#1727 review R2: with a shared gpg.format=ssh and no user.signingKey, git runs gpg.ssh.defaultKeyCommand to
+    find a key. JARVES blanks it, so a signed ship-path commit fails cleanly and the agent's command never runs."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _cfg(repo, "gpg.format", "ssh")
+    _cfg(repo, "gpg.ssh.defaultKeyCommand", _sh(marker, "echo key::ssh-ed25519 AAAA"))
+    _cfg(repo, "gpg.ssh.program", _sh(marker, "exit 1"))
+    (repo / "f.txt").write_text("signed?\n", encoding="utf-8")
+    gitops.git(repo, "add", "f.txt")
+    p = gitops.git(repo, "commit", "-qm", "s", "-S", check=False, ident=False)
+    assert p.returncode != 0 and not marker.exists(), p.stderr
+
+
+def test_ignoring_grafts_adds_no_git_warning(tmp_path):
+    """#1727 review R3: GIT_GRAFT_FILE points at /dev/null (POSIX) or a path below kernel32.dll (Windows); git must
+    read history there without an "unable to access" warning (the Windows CI shards run this)."""
+    repo = _repo(tmp_path)
+    p = gitops.git(repo, "rev-list", "HEAD")
+    assert p.stdout.strip() and p.stderr == ""

@@ -80,15 +80,19 @@ _PROGRAMS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.progr
              "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
 HOOK_NOOP = "git version"   # a config hook's command (#1407): git puts itself on its children's PATH, on Windows too
 # (#1407) replace refs and `.git/info/grafts` are agent-writable and swap the tree/history behind an approved commit.
-# The graft file: POSIX /dev/null (empty); Windows a path below a file (ENOENT, git does not warn about that).
-GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": NO_HOOKS}
+# The graft file is a path below a file that cannot exist (ENOTDIR/ENOENT: git neither reads nor warns; a readable
+# empty file would print the "grafts is deprecated" hint on every call, #1727 R3). git 2.31-2.41 let a shared
+# `core.useReplaceRefs=true` beat GIT_NO_REPLACE_OBJECTS, so every call also pins it at command scope (#1727 R1).
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1",
+           "GIT_GRAFT_FILE": os.path.join(NO_HOOKS, "no-grafts")}
+NO_REPLACE = ("-c", "core.useReplaceRefs=false")
 _SHARED_SCOPES = ("local", "worktree")      # the repository's own config: agents can write it through `.git`
 MIN_GIT = (2, 31)                           # GIT_CONFIG_COUNT/KEY/VALUE: older git ignores them (fails open)
 _GIT_OK: list[bool] = []                    # the version check passed once in this process
 
 
 def _run(cwd: str | Path, *argv: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=30,
+    return subprocess.run(["git", *NO_REPLACE, *argv], cwd=str(cwd), capture_output=True, text=True, timeout=30,
                           creationflags=_NOWIN, env=child_env(GIT_ENV), encoding="utf-8", errors="replace")
 
 
@@ -180,7 +184,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     the config read and the command (one read per call, #1533)."""
     if args and args[0].startswith("-"):
         raise GitError(f"git() takes the subcommand first, not the global option {args[0].split('=', 1)[0]}")
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+    pre = [*(IDENT if ident else []), *NO_REPLACE, "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "submodule.recurse=false", "-c", "diff.ignoreSubmodules=dirty"]
     env = child_env({**GIT_ENV, "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":", **shared_config_overrides(cwd)})
     if args[:1] in (("diff",), ("show",), ("log",)):   # a blank diff driver fails these; the flags show plain text

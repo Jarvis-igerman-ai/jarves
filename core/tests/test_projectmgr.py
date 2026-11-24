@@ -627,7 +627,8 @@ def test_ship_without_an_integration_commit_or_with_a_git_timeout_merges_nothing
     m._ask = lambda *a, **k: True
     monkeypatch.setattr(gitops, "integration_branch", lambda pid: "jarves/no-such-branch")
     assert m.call("ship_plan", project="demo", apply=True)["code"] == "NO_INTEGRATION"
-    assert m.call("ship_plan", project="demo")["commands"] == []
+    plan = m.call("ship_plan", project="demo")                   # review R4: the same result shape as a plan
+    assert plan["commands"] == [] and plan["worktree"].endswith("integration")
 
     def slow(*a, **k):
         raise subprocess.TimeoutExpired("git", 1)

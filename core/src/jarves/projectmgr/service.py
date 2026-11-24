@@ -912,9 +912,10 @@ class Manager(StageEngine):
                              check=False).stdout.strip()
         except (OSError, subprocess.SubprocessError, gitops.GitError) as e:
             return _res(False, "GIT_ERROR", f"cannot read the integration branch {br}: {e}"[:300])
+        wt = gitops.project_root(self.home, p["id"]) / "integration"
         if not tip:
             return _res(not apply, "NO_INTEGRATION" if apply else "ok", f"{p['name']}: no integration branch {br} "
-                        "yet, nothing to take.", branch=br, commit="", commands=[])
+                        "yet, nothing to take.", branch=br, commit="", worktree=str(wt), commands=[])
         if apply:
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
@@ -931,7 +932,6 @@ class Manager(StageEngine):
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
             return _res(True, "ok", f"Merged {br} at commit {tip[:12]} into {st['branch']}. Nothing was pushed.")
-        wt = gitops.project_root(self.home, p["id"]) / "integration"
         try:
             stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{tip}", check=False).stdout.strip() or "no changes"
         except (OSError, subprocess.SubprocessError, gitops.GitError):
