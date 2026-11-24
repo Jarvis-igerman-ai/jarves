@@ -192,7 +192,8 @@ class Tool:
     untrusted_output: bool = False     # returns third-party text (mail, calendar): see SkillRegistry.new_turn
     recipient: Callable[[Any], str | None] | None = None   # send tools: who it goes to (first name is spoken aloud)
     # extra approval metadata (SW-V4 F): (validated args) -> {"details": {...}, "typed": bool, "voice": bool} merged
-    # into the approvals request (a WhatsApp send shows name + number + full text; typed at night).
+    # into the approvals request (a WhatsApp send shows name + number + full text; typed at night); a non-empty
+    # "prompt" replaces the question text itself, so a confirm without meta support still shows those details.
     # INVARIANT (#1514): SkillRegistry.call runs it, before the ask, on the SAME args instance it then passes to the
     # handler; pref_confirm binds the shown wording on it (test_registry_hands_approval_meta_and_handler_the_same_...).
     approval_meta: Callable[[Any], dict] | None = None
@@ -526,6 +527,8 @@ class SkillRegistry:
             for k in ("typed", "voice", "why"):
                 if k in extra:
                     meta[k] = extra[k]
+            if isinstance(extra.get("prompt"), str) and extra["prompt"].strip():
+                prompt = extra["prompt"]        # #1514: a plain confirm(prompt) callback shows the bound details too
         if prompt and not await self._ask(prompt, **meta):
             return self._not_approved(tool.name, origin)
         return None

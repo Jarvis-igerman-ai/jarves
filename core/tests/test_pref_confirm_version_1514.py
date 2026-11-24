@@ -82,10 +82,10 @@ def _registry(p, on_ask, accepts_meta=True):
     reg = SkillRegistry()
 
     async def confirm(prompt, **meta):
-        return on_ask(meta)
+        return on_ask(prompt, meta)
 
     async def plain(prompt):
-        return on_ask({})
+        return on_ask(prompt, {})
     confirm.accepts_meta = True
     reg.confirm = confirm if accepts_meta else plain
     reg.register(prefs_mod.make_skill(p))
@@ -94,13 +94,17 @@ def _registry(p, on_ask, accepts_meta=True):
 
 
 async def test_voice_confirm_for_old_wording_after_an_edit_leaves_the_new_wording_proposed(home):
-    for accepts_meta in (True, False):                # a plain confirm(prompt) callback binds the wording too
+    for accepts_meta in (True, False):                # a plain confirm(prompt) callback must be SHOWN the wording too
         p = prefs_mod.Preferences(open_db(home))
         pid = p.suggest(A + str(accepts_meta), "I said so", "voice")["item"]["id"]
         asks: list = []
 
-        def edit_while_asking(meta):                  # the owner hears A; the edit to B commits before the yes lands
-            asks.append(meta.get("details", {}).get("preference"))
+        def edit_while_asking(prompt, meta):          # the owner hears A; the edit to B commits before the yes lands
+            shown = p.get(pid)["text"]
+            assert shown in prompt, prompt            # gpt blocker (#1740): the question itself carries the words
+            if accepts_meta:
+                assert meta["details"]["preference"] == shown
+            asks.append(shown)
             if len(asks) == 1:
                 p.edit(pid, B + str(accepts_meta), by="phone", repropose=True)
             return True
@@ -109,8 +113,7 @@ async def test_voice_confirm_for_old_wording_after_an_edit_leaves_the_new_wordin
         assert not r.ok and r.code == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
         r = await reg.call("pref_confirm", {"id": pid}, origin="user")         # asked again, now with B
         assert r.ok and p.get(pid)["state"] == "confirmed" and len(asks) == 2
-        if accepts_meta:
-            assert asks == [A + "True", B + "True"]
+        assert asks == [A + str(accepts_meta), B + str(accepts_meta)]
 
 
 async def test_voice_confirm_handler_that_was_never_shown_the_wording_does_not_confirm(home):
@@ -212,3 +215,33 @@ def test_dashboard_api_errors_carry_the_server_code():
                          check=False)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "changed|PREF_CONFLICT"
+
+
+@pytest.mark.parametrize("given, asked", [("Send «x»?", "Send «x»?"), ("  ", "ok?"), (7, "ok?"), (None, "ok?")])
+async def test_approval_meta_prompt_replaces_the_question_only_when_it_is_real_text(given, asked):
+    """gpt blocker (#1740): approval_meta's "prompt" reaches a plain confirm(prompt); junk keeps the tool's prompt."""
+    from pydantic import BaseModel
+    from jarves.skills import Skill, Tool, ToolResult
+    prompts: list = []
+
+    class Args(BaseModel):
+        n: int = 1
+
+    async def handler(_a):
+        return ToolResult(True, "ok")
+
+    class S(Skill):
+        name, description = "s1514p", "test"
+
+        def tools(self):
+            return [Tool("t1514p", "t", handler, Args, permission="action", confirm="ok?",
+                         approval_meta=lambda a: {"prompt": given})]
+    reg = SkillRegistry()
+
+    async def plain(prompt):
+        prompts.append(prompt)
+        return True
+    reg.confirm = plain
+    reg.register(S())
+    reg.allowed_actions |= {"t1514p"}
+    assert (await reg.call("t1514p", {}, origin="model")).ok and prompts == [asked]

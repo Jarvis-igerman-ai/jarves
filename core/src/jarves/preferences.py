@@ -385,7 +385,9 @@ def make_skill(prefs: Preferences):
                 if not r:
                     return {}
                 a._shown = str(r["text"])[:MAX_TEXT]      # #1514: the handler confirms only these words
-                return {"details": {"preference": a._shown}}
+                # the prompt itself carries them: a plain confirm(prompt) callback (no meta) shows them as well
+                return {"details": {"preference": a._shown},
+                        "prompt": f"לזכור את ההעדפה \"{a._shown}\"? / Remember this preference: \"{a._shown}\"?"}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
