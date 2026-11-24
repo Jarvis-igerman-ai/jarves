@@ -69,7 +69,7 @@ def test_glued_and_plural_credential_words_refuse_a_sha(word):
 
 
 @pytest.mark.parametrize("text", ["אסימון " + SHA40, "הטוקן שלי " + SHA40, "המפתחות: " + SHA40, "הסוד שלנו " + SHA40,
-                                  "השתמש ב-" + SHA40 + " בתור הטוקן"])
+                                  "השתמש ב-" + SHA40 + " בתור הטוקן", "סיסמה: c0ffee7ab", "הסיסמא שלי " + SHA40])
 def test_hebrew_credential_words_refuse_a_sha(text):
     assert looks_sensitive(text), text
 
@@ -113,6 +113,12 @@ def test_bare_40_hex_with_a_digit_run_keeps_the_long_number_rule(text):
                                   "sha256 " + SHA256_DIGITS + " of the installer", "sha512 checksum " + SHA512_DIGITS])
 def test_named_shas_and_digests_with_a_digit_run_are_allowed(text):
     assert not looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("word", ["password", "salary", "credit card", "סיסמה", "משכורת"])
+def test_word_rules_still_see_a_named_sha(word):
+    # Blanking a named SHA only hides it from the long-number rule; the sensitive-word rules see the whole text.
+    assert looks_sensitive(f"commit {SHA40_DIGITS} {word}"), word
 
 
 def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):

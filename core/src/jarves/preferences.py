@@ -41,8 +41,8 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 # Text that must never be learned: credentials, card/ID/phone-like numbers, and health or money details.
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
-    r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription", re.I)
+_LONG_NUMBER = re.compile(r"\d{6,}|\d[\d -]{10,}\d")   # card/ID/phone-like numbers (a named commit SHA is exempt)
 
 
 # #1516: an unbroken base32 run (A-Z, 2-7; TOTP/2FA seeds) of 16+ chars. Refused when it has two or more separate
@@ -113,7 +113,7 @@ def _secret_shaped(t: str) -> bool:
     for m in _HEX.finditer(t):
         run = m.group(0)
         one_case = run.islower() or run.isupper()
-        allowed = one_case and (len(run) == 40 or len(run) in (32, 64, 128) and _hash_named(t, m))
+        allowed = one_case and (len(run) == 40 or (len(run) in (32, 64, 128) and _hash_named(t, m)))
         if _cred_near(t, m) or not allowed:   # a bare 40-hex is taken as a git SHA (old 40-hex tokens: safe-side gap)
             return True
     # A shorter SHA-shaped value next to a credential word ("token 3f9c2ab4e1d07b5a"). A digit is required so that
@@ -134,7 +134,9 @@ def _drop_sha(m: re.Match) -> str:
 
 def looks_sensitive(text: str) -> bool:
     text = text or ""
-    return bool(_SENSITIVE.search(_SHA.sub(_drop_sha, text))) or _base32(text) or _secret_shaped(text)
+    # Only the long-number rule sees the text with named SHAs blanked; the word rules see the original text.
+    return (bool(_SENSITIVE.search(text) or _LONG_NUMBER.search(_SHA.sub(_drop_sha, text)))
+            or _base32(text) or _secret_shaped(text))
 
 
 def normalize(text: str) -> str:
