@@ -54,8 +54,9 @@ _KEY_VALUE = re.compile(
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword, a bare "key" included) the
     # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, or a bare number of 4+
     # digits (a PIN), so state words such as "expired", "rotated" or "well-known" stay allowed. Review 5 R3: inner
-    # punctuation stays part of the value ("ab.cd12ef"); only a trailing . , ; ! ? ends it.
-    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
+    # punctuation stays part of the value ("ab.cd12ef"); only a trailing . , ; ! ? ends it. A bare "secret" counts
+    # here only (not before a colon), so a task such as "rotate the client secret next week" stays allowed.
+    rf"(?:{_KEY_WORD}|\bkeys?\b|api[\s_-]*secret|\bsecrets?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
     r"(?:(?=\S*[\d_+/=@#$%*&])\S{5,}[^\s.,;!?]|\d{4,}(?![^\s.,;!?]))", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys, and neither is a camelCase name built from
