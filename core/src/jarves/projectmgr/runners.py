@@ -97,6 +97,21 @@ class Runner:
     def run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
             check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None,
             team: bool = False) -> Result:
+        """One agent run. An agent that changed the repository's shared git files fails; they are put back (#1533)."""
+        try:
+            with gitops.shared_config_guard(cwd) as changed:
+                r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
+                              timeout=timeout, on_start=on_start, cancel=cancel, team=team)
+        except gitops.GitError as e:            # they changed after the last run: no agent starts
+            return Result(error=str(e))
+        except OSError as e:
+            return Result(error=f"the shared git files could not be checked or put back: {e}")
+        if changed:
+            r.ok, r.error = False, "the agent " + gitops.tamper_text(changed)
+        return r
+
+    def _run(self, prompt: str, cwd: str, *, model: str, resume: str, read_only: bool, check_argv: list[str] | None,
+             timeout: float, on_start, cancel: threading.Event | None, team: bool) -> Result:
         try:
             spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
                               team=team)
