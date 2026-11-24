@@ -786,21 +786,37 @@ async def test_1526_old_text_is_gone_from_the_file_and_wal_bytes(env, monkeypatc
     assert b"read secret-a" not in raw and b"it broke" not in raw
 
 
-async def test_1526_busy_wal_checkpoint_is_a_failure_and_retried(env, monkeypatch):
+async def test_1526_busy_wal_checkpoint_retries_only_the_truncate_with_backoff(env, monkeypatch):
     import sqlite3
     await _old_text_plan(env, monkeypatch)
-    logged = []
+    logged, scans, mono = [], [], Clock(0.0)
+    env.runner.mono = mono
     monkeypatch.setattr(gp.logs, "warn", lambda *a, **k: logged.append(a[1]))
+    real = env.store.scrub_private
+    monkeypatch.setattr(env.store, "scrub_private", lambda: scans.append(1) or real())
     reader = sqlite3.connect(env.db.path)
     reader.execute("BEGIN")
     reader.execute("SELECT count(*) FROM goal_plans").fetchall()              # holds a read snapshot of the WAL
     monkeypatch.setattr(gp.logs, "privacy", lambda: True)
     await env.runner.tick()
-    assert logged == ["PLAN_SCRUB_FAILED"] and env.runner._scrubbed is None   # not marked done: retried next tick
+    assert logged == ["PLAN_SCRUB_FAILED"] and env.runner._wal_at == 2.0      # busy: retried after a backoff
+    mono.t = 2.0
+    await env.runner.tick()
+    assert env.runner._wal_at == 6.0 and logged == ["PLAN_SCRUB_FAILED"]       # doubled, still logged once
+    assert scans == [1]                                                       # the rows are never rescanned for it
     reader.rollback()
     reader.close()
     await env.runner.tick()
-    assert env.runner._scrubbed is not None and b"read secret-a" not in _disk_bytes(env)
+    assert env.runner._wal_at == 6.0                                          # not due yet: no checkpoint on this tick
+    mono.t = 6.0
+    await env.runner.tick()
+    assert env.runner._wal_at is None and scans == [1] and b"read secret-a" not in _disk_bytes(env)
+
+
+async def test_1526_scrub_restores_secure_delete(env):
+    env.db.x("PRAGMA secure_delete=OFF")
+    env.store.scrub_private()
+    assert env.db._db.execute("PRAGMA secure_delete").fetchone()[0] == 0
 
 
 async def test_1526_text_written_while_off_between_two_ticks_is_rescanned(env, monkeypatch):
@@ -826,15 +842,25 @@ async def test_1526_block_reason_is_reduced_in_privacy_mode(env, monkeypatch):
     assert d["steps"][0]["error"] == "" and d["note"] == "step 1" and "hunter2" not in _all_text(env)
 
 
-async def test_1526_text_in_free_pages_from_an_older_delete_is_gone(env, monkeypatch):
-    _a, b = await _old_text_plan(env, monkeypatch)
-    env.db.x("PRAGMA secure_delete=OFF")
-    for i in range(200):                                                      # enough old rows to fill whole pages
-        env.db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence) VALUES (?,?,?,?,?)",
-                 (b, i + 1, "fake_bad", "failed", "it broke " * 26))
-    env.store.delete(b)                                                       # deleted before privacy: freed, not wiped
-    env.db._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
-    assert b"it broke" in _disk_bytes(env)
+
+async def test_1526_block_note_written_while_off_between_two_ticks_is_rescanned(env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(1) or 0)
+    p = env.store.propose("b", steps(("fake_read", {"text": "z"})))
+    await env.runner.tick()
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
+    env.runner._block(p["id"], env.store.get(p["id"])["steps"][0], "tool says hunter2")
     monkeypatch.setattr(gp.logs, "privacy", lambda: True)
     await env.runner.tick()
-    assert b"it broke" not in _disk_bytes(env)
+    assert calls == [1, 1]
+
+
+async def test_1526_done_plan_in_privacy_mode_leaves_nothing_to_scrub(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    p = env.store.propose("ok", steps(("fake_read", {"text": "q"}), ("fake_bad", {})))
+    env.store.approve(p["id"])
+    env.store.skip(p["id"], 1)
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["state"] == "done" and d["result"] == "1/2 steps done." and env.store.scrub_private() == 0

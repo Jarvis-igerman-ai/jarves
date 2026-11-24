@@ -352,33 +352,42 @@ class PlanStore:
         return n
 
     def scrub_private(self) -> int:
-        """#1526: privacy mode keeps no tool text, also in rows written before it was on. ONE transaction (never
-        adopts an open one: BEGIN raises), then VACUUM and a WAL truncate; a busy checkpoint raises, so the caller
-        retries. Returns rows changed."""
+        """#1526: privacy mode keeps no tool text, also in rows written before it was on. ONE transaction over the two
+        plan tables only (never adopts an open one: BEGIN raises); secure_delete is on for it so the old cell bytes are
+        zeroed, then restored. Free pages from older deletes are not compacted (no whole-file VACUUM of the shared
+        memory.db). Returns rows changed; truncate_wal() then drops the WAL frames that still hold the old text."""
         with self.db._lock:
             c = self.db._db
+            was = c.execute("PRAGMA secure_delete").fetchone()[0]
             c.execute("PRAGMA secure_delete=ON")
-            c.execute("BEGIN IMMEDIATE")
             try:
-                n = 0
-                for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps").fetchall():
-                    if r["evidence"] or r["error"] != _private_text(r["error"]):
-                        c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (_private_text(r["error"]), r["id"]))
-                        n += 1
-                for r in c.execute("SELECT id, result, note FROM goal_plans").fetchall():
-                    new = (_private_result(r["result"]), _private_note(r["note"]))
-                    if new != (r["result"] or "", r["note"] or ""):
-                        c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (*new, r["id"]))
-                        n += 1
-                c.commit()
-            except BaseException:
-                c.rollback()
-                raise
-            c.execute("VACUUM")                       # free pages left by older deletes still held text (R4)
-            busy = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
-            if busy:                                  # a reader holds the WAL: its frames keep the old text, retry
-                raise sqlite3.OperationalError("wal checkpoint busy")
+                return self._scrub_rows(c)
+            finally:
+                c.execute(f"PRAGMA secure_delete={int(was)}")
+
+    def _scrub_rows(self, c) -> int:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            n = 0
+            for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps").fetchall():
+                if r["evidence"] or r["error"] != _private_text(r["error"]):
+                    c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (_private_text(r["error"]), r["id"]))
+                    n += 1
+            for r in c.execute("SELECT id, result, note FROM goal_plans").fetchall():
+                new = (_private_result(r["result"]), _private_note(r["note"]))
+                if new != (r["result"] or "", r["note"] or ""):
+                    c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (*new, r["id"]))
+                    n += 1
+            c.commit()
+        except BaseException:
+            c.rollback()
+            raise
         return n
+
+    def truncate_wal(self) -> bool:
+        """False while a reader holds the WAL (SQLite reports busy as a row, not an error): its frames keep old text."""
+        with self.db._lock:
+            return not self.db._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
 
 
 MAX_ATTEMPTS = 3
@@ -450,34 +459,49 @@ class PlanRunner:
     """Executes approved plans one step at a time against the Skill registry."""
 
     def __init__(self, store: PlanStore, registry, *, budget=None, clock=time.time, features=None,
-                 sleep=asyncio.sleep) -> None:
+                 sleep=asyncio.sleep, mono=time.monotonic) -> None:
         self.store, self.registry, self.budget, self.clock, self.features = store, registry, budget, clock, features
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
         self._scrubbed: int | None = None             # the _PLAIN count the last scrub covered (None = not since privacy on)
         self._scrub_warned = False
+        self.mono, self._wal_at, self._wal_wait = mono, None, 0.0   # pending WAL truncate: due time and backoff
 
     def _scrub(self) -> None:
         """#1526: with privacy on, scrub when no scrub covered the current _PLAIN count: the first tick (a Core start
-        with privacy on), an off->on edge, and tool text written while privacy was off between two ticks. A failure
-        (also a busy WAL checkpoint) is retried on the next tick and logged once per outage; it never stops plans."""
+        with privacy on), an off->on edge, and tool text written while privacy was off between two ticks. After the rows,
+        the WAL is truncated; a busy truncate alone is retried with a backoff (2 s doubling to 300 s), the rows are not
+        rescanned. Failures are logged once per outage and never stop plans."""
         if not logs.privacy():
             self._scrubbed = None
             return
         seen = _PLAIN[0]
-        if self._scrubbed == seen:                    # nothing written with privacy off since (also off/on between ticks)
+        if self._scrubbed != seen:                    # something was written with privacy off (also off/on between ticks)
+            try:
+                n = self.store.scrub_private()
+            except sqlite3.Error as e:
+                return self._scrub_failed(type(e).__name__)
+            self._scrubbed, self._wal_at, self._wal_wait = seen, self.mono(), 0.0
+            if n:
+                logs.info("goals", "PLAN_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
+        if self._wal_at is None or self.mono() < self._wal_at:
             return
         try:
-            n = self.store.scrub_private()
-        except sqlite3.Error as e:
-            if not self._scrub_warned:
-                logs.warn("goals", "PLAN_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
-                self._scrub_warned = True
+            ok = self.store.truncate_wal()
+        except sqlite3.Error:
+            ok = False
+        if ok:
+            self._wal_at, self._scrub_warned = None, False
             return
-        self._scrubbed, self._scrub_warned = seen, False
-        if n:
-            logs.info("goals", "PLAN_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
+        self._wal_wait = min(max(2.0, 2 * self._wal_wait), 300.0)
+        self._wal_at = self.mono() + self._wal_wait
+        self._scrub_failed("WalBusy")
+
+    def _scrub_failed(self, why: str) -> None:
+        if not self._scrub_warned:
+            logs.warn("goals", "PLAN_SCRUB_FAILED", "could not scrub older plan text", error_type=why)
+            self._scrub_warned = True
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
@@ -510,6 +534,8 @@ class PlanRunner:
     def _stop_plan(self, pid: int, state: str, note: str, **extra) -> None:
         if logs.privacy():
             note = _private_note(note)                # #1526: "step N: <reason>" as the scrub keeps it
+        else:
+            _PLAIN[0] += 1                            # this note and the step error before it may quote a tool
         if not self.store._set_if(pid, ("running",), state, note=_short(note, 200), **extra):
             return                                   # the owner paused/cancelled meanwhile: that wins (#813)
         logs.info("goals", "PLAN_STOPPED", "plan stopped", id=pid, state=state)
@@ -641,8 +667,6 @@ class PlanRunner:
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
         if logs.privacy():
             why = _private_text(why)                  # #1526: a new write equals what the scrub keeps
-        else:
-            _PLAIN[0] += 1
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
@@ -655,8 +679,11 @@ class PlanRunner:
         lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
         text = _short("; ".join(lines), RESULT_CHARS)
         done = sum(1 for s in steps if s["status"] == "done")
-        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="",
-                          result=f"{done}/{len(steps)} steps done. {text}"):
+        if logs.privacy():
+            result = f"{done}/{len(steps)} steps done."          # #1526: what the scrub keeps
+        else:
+            result, _PLAIN[0] = f"{done}/{len(steps)} steps done. {text}", _PLAIN[0] + 1
+        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="", result=result):
             return st.get(pid)                       # cancelled/paused meanwhile (#813)
         logs.info("goals", "PLAN_DONE", "plan done", id=pid, count=done)
         return st.get(pid)
