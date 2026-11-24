@@ -1,14 +1,17 @@
 """Refuse a real stable publish unless `stable-release` is a protected environment (#544).
 
-GitHub creates an environment named by a job on first use WITHOUT protection rules, so `environment: stable-release`
-alone does not keep RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY behind the owner. This reads the environment and its
-deployment policies over the GitHub API (read-only) and exits 1 unless it has a required reviewer AND a custom policy
-made only of tag rules (at least one, no branch rule). That is docs/RELEASING.md "Owner settings", step 3; the tag
-ruleset (step 2) and where the secrets live (step 4) cannot be read here. `can_admins_bypass: true` and a tag rule other than exactly `v*.*.*` are warnings only.
+GitHub creates an environment named by a job on first use WITHOUT protection rules, so
+`environment: stable-release` alone does not keep RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY behind
+the owner. This reads the environment and its deployment policies over the GitHub API (read-only)
+and exits 1 unless it has a required reviewer (a User or Team entry with an id) AND a custom policy
+made only of tag rules (at least one, no branch rule): docs/RELEASING.md "Owner settings", step 3.
+Steps 2 and 4 are not checked. Limit: team membership is not read, so a team-only reviewer list
+passes with a warning. `can_admins_bypass: true` and a tag rule other than exactly `v*.*.*` are
+warnings only.
 Any API or parse failure also refuses (fail closed).
 
     python core/tools/release_env_guard.py --repo OWNER/REPO          # uses `gh api` (GH_TOKEN)
-    python core/tools/release_env_guard.py --from-file env.json --policies-file policies.json   # offline check
+    python core/tools/release_env_guard.py --from-file env.json --policies-file policies.json  # offline
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ def problems(env: object, policies: object) -> list[str]:
         out.append(f"the environment name is not {ENV_NAME}")
     rules = env.get("protection_rules")
     rules = rules if isinstance(rules, list) else []
-    if not any(isinstance(r, dict) and r.get("type") == "required_reviewers" and r.get("reviewers") for r in rules):
+    if not _reviewers(rules):
         out.append("no required reviewer is set (Settings, Environments, Required reviewers)")
     if not _custom(env):
         out.append("deployments are not limited to selected tags (add the tag rule v*.*.*)")
@@ -49,6 +52,17 @@ def problems(env: object, policies: object) -> list[str]:
     return out
 
 
+def _reviewers(rules: list) -> list[str]:
+    """Types of the usable reviewer entries: a User or Team with an id (an empty or junk list is none)."""
+    return [
+        rv["type"]
+        for r in rules if isinstance(r, dict) and r.get("type") == "required_reviewers" and isinstance(r.get("reviewers"), list)
+        for rv in r["reviewers"]
+        if isinstance(rv, dict) and rv.get("type") in ("User", "Team")
+        and isinstance(rv.get("reviewer"), dict) and rv["reviewer"].get("id") is not None
+    ]
+
+
 def _custom(env: dict) -> bool:
     policy = env.get("deployment_branch_policy")
     return isinstance(policy, dict) and policy.get("custom_branch_policies") is True
@@ -58,6 +72,10 @@ def warnings(env: object, policies: object = None) -> list[str]:
     out = []
     if isinstance(env, dict) and env.get("can_admins_bypass") is not False:
         out.append("administrators may bypass the required reviewer (untick 'Allow administrators to bypass')")
+    rules = env.get("protection_rules") if isinstance(env, dict) else None
+    kinds = _reviewers(rules if isinstance(rules, list) else [])
+    if kinds and "User" not in kinds:
+        out.append("only team reviewers are set; their members are not checked (add yourself as a User reviewer)")
     entries = policies.get("branch_policies") if isinstance(policies, dict) else None
     if isinstance(entries, list) and not any(isinstance(e, dict) and e.get("type") == "tag" and e.get("name") == "v*.*.*" for e in entries):
         # a broad tag rule (for example *) still passes; only the reviewer and the tag ruleset then guard the secrets

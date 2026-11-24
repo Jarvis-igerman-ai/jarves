@@ -18,7 +18,7 @@ import release_env_guard as guard  # noqa: E402
 PROTECTED = {
     "name": "stable-release",
     "can_admins_bypass": False,
-    "protection_rules": [{"type": "required_reviewers", "reviewers": [{"type": "User", "reviewer": {"login": "o"}}]}],
+    "protection_rules": [{"type": "required_reviewers", "reviewers": [{"type": "User", "reviewer": {"login": "o", "id": 1}}]}],
     "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
 }
 TAG_ONLY = {"total_count": 1, "branch_policies": [{"name": "v*.*.*", "type": "tag"}]}
@@ -128,3 +128,20 @@ def test_broad_tag_rule_passes_with_a_warning():
     assert guard.problems(PROTECTED, broad) == []
     assert any("v*.*.*" in w for w in guard.warnings(PROTECTED, broad))
     assert guard.warnings(PROTECTED, TAG_ONLY) == []
+
+
+def test_reviewer_entry_must_be_a_user_or_team_with_an_id():
+    # PR #1709 review R1: a non-empty list of junk entries is not a required reviewer
+    def with_reviewers(*rv):
+        return dict(PROTECTED, protection_rules=[{"type": "required_reviewers", "reviewers": list(rv)}])
+    for junk in ("x", {}, {"type": "User"}, {"type": "User", "reviewer": None}, {"type": "Bot", "reviewer": {"id": 2}}):
+        assert any("reviewer" in p for p in guard.problems(with_reviewers(junk), TAG_ONLY)), junk
+    team_only = with_reviewers({"type": "Team", "reviewer": {"slug": "t", "id": 9}})
+    assert guard.problems(team_only, TAG_ONLY) == []
+    assert any("team" in w for w in guard.warnings(team_only, TAG_ONLY))
+    assert guard.warnings(PROTECTED, TAG_ONLY) == []
+
+
+def test_module_docstring_is_wrapped():
+    # PR #1709 review R2
+    assert max(len(line) for line in guard.__doc__.splitlines()) <= 110

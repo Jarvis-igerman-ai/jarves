@@ -180,7 +180,9 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    `stable-release`. Under "Deployment branches and tags" choose "Selected branches and tags", add a TAG rule `v*.*.*` (no
    branch rule). Tick "Required reviewers" and add yourself. Untick "Allow administrators to bypass configured protection
    rules". Save. A real publish refuses unless this environment has a required reviewer and only tag rules
-   (`core/tools/release_env_guard.py`); an admin bypass is printed as a warning.
+   (`core/tools/release_env_guard.py`); an admin bypass or a team-only reviewer list is printed as a warning (team
+   members are not read). The guard reads the environment with the job's `GITHUB_TOKEN` (`actions: read`); no real tag
+   run has exercised that yet (UNVERIFIED). If the read is refused the publish stops (fail closed); check the first run.
 4. **Move the two secrets into that environment.** In the same page, "Environment secrets", add `RELEASES_TOKEN` and
    `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
    repository secrets of the same names. (The publish job now names `environment: stable-release` for real publishes (#544, merged with this change);
