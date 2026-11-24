@@ -125,36 +125,34 @@ def session_key(token: str, session: str) -> str:
 
 def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     """Unexpired stored session digests; a missing or damaged file means no stored sessions."""
+    return load_session_state(home, now)[0]
+
+
+def load_session_state(home: Path, now: float | None = None) -> tuple[dict[str, float], dict[str, None]]:
+    """Stored sessions and owner windows (#1416) from ONE read of sessions.json, so the two cannot disagree.
+    Owner windows are the stored owner digests that are also live sessions, oldest first; damage means none."""
     now = time.time() if now is None else now
     try:
         raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
-            return {}
+            return {}, {}
         owner = owner_list(raw)
 
         def limit(k: str) -> float:  # #1416: only an owner window (unlocked, up to 1 week) lives past a login's 12 h
             return now + (max(SESSION_TTL_S, unlock.UNLOCK_TTL_S) if k in owner else SESSION_TTL_S)
-        return {k: float(v) for k, v in rows.items()
+        live = {k: float(v) for k, v in rows.items()
                 if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{64}", k) and isinstance(v, (int, float))
                 and now < float(v) <= limit(k)}
+        return live, dict.fromkeys(k for k in owner if k in live)
     except (OSError, ValueError, TypeError):
-        return {}
+        return {}, {}
 
 
 def owner_list(raw) -> list[str]:
     """The newest UNLOCK_OWNER_WINDOWS stored owner digests (#1416), oldest first; anything damaged means none."""
     rows = raw.get("owner") if isinstance(raw, dict) else None
     return [k for k in rows if isinstance(k, str)][-UNLOCK_OWNER_WINDOWS:] if isinstance(rows, list) else []
-
-
-def load_owner_windows(home: Path, live: dict[str, float]) -> dict[str, None]:
-    """Stored owner windows (#1416) that are still live sessions, oldest first; anything damaged means none."""
-    try:
-        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return dict.fromkeys(k for k in owner_list(raw) if k in live)
 
 
 def save_sessions(home: Path, digests: dict[str, float], owner: tuple[str, ...] | list[str] = ()) -> None:
@@ -189,10 +187,10 @@ class Server(ThreadingHTTPServer):
         self.session_lock = threading.Lock()
         # Sessions from before a restart (#789): digest -> end. A matching cookie moves back into
         # `sessions`; the in-memory raw ids are never written anywhere.
-        self.restored: dict[str, float] = load_sessions(self.home)
+        self.restored, owner = load_session_state(self.home)
         # #1416: digests of owner windows, i.e. sessions that once typed a correct terminal code. Their wrong tries
         # stay outside the shared total, so token-only windows cannot cancel a code for the owner's window.
-        self.owner_windows: dict[str, None] = load_owner_windows(self.home, self.restored)  # ordered, oldest first
+        self.owner_windows: dict[str, None] = owner  # ordered, oldest first
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
@@ -219,8 +217,14 @@ class Server(ThreadingHTTPServer):
                 self.sessions[session] = end
         return end if end > now else 0
 
+    def require_session_lock(self) -> None:
+        """#1416: the session and owner-window state changes only under session_lock; a caller without it is a bug."""
+        if not self.session_lock.locked():
+            raise RuntimeError("session state changed without session_lock")
+
     def persist_sessions(self, now: float) -> None:
         """Drop expired sessions and store digests of the rest. Caller holds session_lock."""
+        self.require_session_lock()
         self.sessions = {s: end for s, end in self.sessions.items() if end > now}
         self.restored = {k: end for k, end in self.restored.items() if end > now}
         digests = dict(self.restored)
@@ -233,12 +237,14 @@ class Server(ThreadingHTTPServer):
 
     def prune_owner_windows(self, now: float) -> None:
         """Keep only owner windows whose session is still live (#1416). Caller holds session_lock."""
+        self.require_session_lock()
         live = {k for k, end in self.restored.items() if end > now}
         live.update(session_key(self.token, s) for s, end in self.sessions.items() if end > now)
         self.owner_windows = {k: None for k in self.owner_windows if k in live}
 
     def add_owner_window(self, session: str) -> None:
         """Mark a session as the newest owner window, keeping at most UNLOCK_OWNER_WINDOWS. Caller holds session_lock."""
+        self.require_session_lock()
         digest = session_key(self.token, session)
         self.owner_windows.pop(digest, None)
         self.owner_windows[digest] = None

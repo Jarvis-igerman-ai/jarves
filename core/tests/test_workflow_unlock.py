@@ -244,14 +244,50 @@ class UnlockTests(unittest.TestCase):
         self.assertGreater(self.server.sessions[owner], time.time() + 7 * 86400 - 60)  # end was stored
 
     def test_damaged_owner_list_means_no_owner_window_1416(self):
-        from jarves.workflow.server import load_owner_windows
+        from jarves.workflow.server import load_session_state
         sid = self.login()
         stored = json.loads((self.home / "sessions.json").read_text(encoding="utf-8"))
         for bad in ({"x": 1}, [1, {"y": 2}, "f" * 64], "nope"):        # unknown digest, wrong types, not a list
             stored["owner"] = bad
             (self.home / "sessions.json").write_text(json.dumps(stored), encoding="utf-8")
-            self.assertEqual(load_owner_windows(self.home, {"f" * 64: 1.0} if bad == "nope" else {}), {}, bad)
+            sessions, owner = load_session_state(self.home)
+            self.assertEqual((len(sessions), owner), (1, {}), bad)
         self.assertTrue(sid)
+
+    def test_sessions_and_owner_windows_come_from_one_read_1416(self):
+        from jarves.workflow import server as srv
+        self.owner_window_then_new_code()
+        real, reads = Path.read_text, []
+        def spy(path, *args, **kwargs):
+            reads.append(path.name)
+            return real(path, *args, **kwargs)
+        with patch.object(Path, "read_text", spy):
+            sessions, owner = srv.load_session_state(self.home)
+        self.assertEqual(reads.count("sessions.json"), 1)             # a file swap between two reads cannot split them
+        self.assertEqual(len(owner), 1)
+        self.assertTrue(set(owner) <= set(sessions))
+
+    def test_session_state_writers_refuse_to_run_without_session_lock_1416(self):
+        sid = self.login()
+        for call in (lambda: self.server.persist_sessions(time.time()),
+                     lambda: self.server.prune_owner_windows(time.time()),
+                     lambda: self.server.add_owner_window(sid)):
+            with self.assertRaises(RuntimeError):
+                call()
+        with self.server.session_lock:
+            self.server.add_owner_window(sid)
+            self.server.persist_sessions(time.time())
+        self.assertEqual(len(self.server.owner_windows), 1)
+
+    def test_login_saves_sessions_under_session_lock_1416(self):
+        from jarves.workflow import server as srv
+        held, real = [], srv.save_sessions
+        def spy(*args, **kwargs):
+            held.append(self.server.session_lock.locked())
+            return real(*args, **kwargs)
+        with patch.object(srv, "save_sessions", spy):
+            self.login()
+        self.assertEqual(held, [True])
 
     def test_damaged_owner_list_after_a_restart_keeps_the_old_cancel_1416(self):
         owner, shown, wrong = self.owner_window_then_new_code()
