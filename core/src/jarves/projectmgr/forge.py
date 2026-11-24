@@ -73,10 +73,14 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
 
 
 # (#1722) the push URL: github.com over https or ssh only. No `<helper>::` (ext::, fd::), no local path, no option.
-_PUSH_URL = re.compile(r"^(?:https://(?:[^@/\s:]+(?::[^@/\s]*)?@)?github\.com/|ssh://git@github\.com/|git@github\.com:)"
-                       r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(?:\.git)?/?\Z")
-# (#1722) keys of the shared (agent-writable) config that would make a push run a command or reroute its URL
-_PUSH_KEY = re.compile(r"^(?:url\..*\.(?:insteadof|pushinsteadof)|remote\..*\.(?:receivepack|uploadpack|vcs)"
+PUSH_URL_FORMS = "https://github.com/OWNER/REPO, ssh://git@github.com[:22]/OWNER/REPO or git@github.com:OWNER/REPO"
+_PUSH_URL = re.compile(r"^(?:https://(?:[^@/\s:]+(?::[^@/\s]*)?@)?(?i:github\.com)/|ssh://git@(?i:github\.com)(?::22)?/"
+                       r"|git@(?i:github\.com):)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(?:\.git)?/?\Z")
+# (#1722) keys of the shared (agent-writable) config that would make a push run a command, reroute its URL, or send
+# the owner's credential elsewhere (proxy, TLS trust, resolve, extra headers)
+_PUSH_KEY = re.compile(r"^(?:url\..*\.(?:insteadof|pushinsteadof)|remote\..*\.(?:receivepack|uploadpack|vcs|proxy)"
+                       r"|http\.(?:.*\.)?(?:proxy|sslverify|sslcainfo|sslcapath|curloptresolve|sslcert|sslkey"
+                       r"|extraheader|cookiefile)"
                        r"|core\.(?:sshcommand|askpass|gitproxy|alternaterefscommand)|credential\.(?:.*\.)?helper"
                        r"|gpg\.(?:.*\.)?program|hook\..*\.command)$", re.S | re.I)
 
@@ -85,26 +89,27 @@ def _push_url(path: str) -> str:
     """The vetted origin URL to push to (#1722); ForgeError when the shared config could run a command on the push."""
     gitops.require_git(path)
     p = gitops._run(path, "config", "--show-scope", "-z", "--get-regexp",
-                    r"^(url|remote|core|credential|gpg|hook)\.")
+                    r"^(url|remote|core|credential|gpg|hook|http)\.")
     if p.returncode not in (0, 1):
         raise ForgeError(f"cannot read the repository's git config: {(p.stderr or '').strip()}"[:300])
     bad = sorted({k for scope, k in gitops._pairs(p.stdout) if scope in gitops._SHARED_SCOPES and _PUSH_KEY.match(k)})
     if bad:
         raise ForgeError(f"JARVES will not push: the repository's own git config sets {bad[0]!r}, which could run a "
-                         "command (move it to your global config, or remove it with git config --local --unset)"[:300])
+                         "command or send your credential elsewhere (move it to your global config, or remove it with git config --local --unset)"[:300])
     url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
     if not _PUSH_URL.match(url):
-        raise ForgeError("JARVES pushes only to a github.com origin over https or ssh")
+        raise ForgeError(f"JARVES pushes only to a github.com origin: {PUSH_URL_FORMS}")
     return url
 
 
 def push_branch(path: str, branch: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch). Pushes to the
-    vetted URL itself, so `remote.origin.*` (pushurl, receivepack, vcs) is never read; unsigned (#1722)."""
+    vetted URL itself, so `remote.origin.*` (pushurl, receivepack, vcs) is never read; unsigned; never into a
+    submodule, whose own config JARVES does not read (#1722). refs/remotes/origin/* is not updated (no reader)."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
-    gitops.git(path, "push", "--no-verify", "--no-signed", _push_url(path), f"refs/heads/{branch}:refs/heads/{branch}",
-               timeout=300, ident=False)
+    gitops.git(path, "push", "--no-verify", "--no-signed", "--recurse-submodules=no", _push_url(path),
+               f"refs/heads/{branch}:refs/heads/{branch}", timeout=300, ident=False)
 
 
 def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:
