@@ -17,8 +17,8 @@ privacy_he = "קול נשלח ל-OpenAI רק אחרי \"היי ג'ארביס\". 
 privacy_en = "Audio goes to OpenAI only after \"Hey Jarvis\". Keys are in a private file and never in logs, backups or the dashboard. A planted-secret audit of 36 sinks found no leak in either privacy mode."
 
 [[steps]]
-he = "בעמוד הבית יש מתג \"פרטיות\": לחיצה אחת, ומיד רק אורך וזמנים נשמרים. תשובות קודמות בטלפון ופרטי צעדי תוכניות נמחקים בהפעלה; שם אפשר גם להסתיר יומנים והיסטוריה שנשמרו קודם."
-en = "The Home page has a Privacy switch: one click, and from then on only lengths and timings are kept. Older phone answers and plan step details are cleared when you switch it on; you can also mask older logs and history there."
+he = "בעמוד הבית יש מתג \"פרטיות\": לחיצה אחת, ומיד רק אורך וזמנים נשמרים. תשובות קודמות בטלפון ופרטי צעדי תוכניות נמחקים בהפעלה (גיבויים וייצואים שנעשו קודם נשארים כמו שהם); שם אפשר גם להסתיר יומנים והיסטוריה שנשמרו קודם."
+en = "The Home page has a Privacy switch: one click, and from then on only lengths and timings are kept. Older phone answers and plan step details are cleared when you switch it on (backups and exports made before stay as they were); you can also mask older logs and history there."
 action = "open:#/home"
 check = "probe:privacy"
 

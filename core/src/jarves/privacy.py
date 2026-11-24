@@ -70,7 +70,7 @@ def set_full_text(ctx, on: bool) -> dict:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
-        scrub_stored_text(ctx.home, timeout=HANDLER_TIMEOUT_S)
+        _scrub_after_switch(ctx.home)
     return state(ctx)
 
 
@@ -85,7 +85,7 @@ def set_privacy(ctx, on: bool) -> dict:
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
     if on:
-        scrub_stored_text(ctx.home, timeout=HANDLER_TIMEOUT_S)
+        _scrub_after_switch(ctx.home)
     return {**state(ctx), "saved_in_config": saved, "config_error": err}
 
 
@@ -169,16 +169,26 @@ def _scrub_plan_steps(home: Path, timeout: float) -> int:
     return n
 
 
-def scrub_stored_text(home: Path, timeout: float = TICK_TIMEOUT_S) -> dict:
-    """Best effort (a busy database or checkpoint gives None and is retried by the Core's next tick); counts only."""
+def _scrub_after_switch(home: Path) -> None:
+    """The switch is already saved: a scrub error must not turn its answer into an error. The Core's tick retries."""
+    try:
+        scrub_stored_text(home, timeout=HANDLER_TIMEOUT_S)
+    except Exception:                               # one line per owner click: bounded
+        logs.error("privacy", "PRIVACY_SCRUB_FAILED", "older stored text scrub failed", exc=True)
+
+
+def scrub_stored_text(home: Path, timeout: float = TICK_TIMEOUT_S, warn: bool = True) -> dict:
+    """Best effort (a busy database or checkpoint gives None and is retried by the Core's next tick); counts only.
+    `warn=False` keeps a repeated partial result out of the log (the Core warns once per failure run)."""
     out = {}
     for name, fn in (("ledger", _scrub_ledger), ("plan_steps", _scrub_plan_steps)):
         try:
             out[name] = fn(Path(home), timeout)
         except sqlite3.Error as e:
             out[name] = None
-            logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older stored text could not be removed yet", part=name,
-                      error_type=type(e).__name__)
+            if warn:
+                logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older stored text could not be removed yet", part=name,
+                          error_type=type(e).__name__)
     if any(out.values()):
         logs.info("privacy", "PRIVACY_SCRUBBED", "older stored text removed after privacy was switched on",
                   ledger=out.get("ledger"), plan_steps=out.get("plan_steps"))

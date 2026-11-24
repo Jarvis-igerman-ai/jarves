@@ -521,7 +521,7 @@ class PlanRunner:
                 res = await asyncio.wait_for(self.registry.call(step["tool"], step["args"], origin="model"),
                                              min(remaining, tool.timeout_s + STEP_GRACE_S))
             except (asyncio.TimeoutError, TimeoutError):
-                self._fail(pid, step, REASON_TIMED_OUT + (": it may already have happened" if consequential else ""), t0,
+                self._fail(pid, step, REASON_MAY_HAVE_RUN if consequential else REASON_TIMED_OUT, t0,
                            status="unknown" if consequential else "failed")
                 return st.get(pid)
             except asyncio.CancelledError:

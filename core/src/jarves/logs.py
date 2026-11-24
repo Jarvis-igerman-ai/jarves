@@ -293,6 +293,13 @@ _flag: Path | None = None
 _flag_mtime: float | None = None
 _flag_checked = 0.0
 _runtime: bool | None = None          # set by a runtime switch since setup() (None = the config value holds)
+_switches = 0                         # #1557: runtime switches applied in this process (an off -> on between two reads counts)
+
+
+def privacy_switches() -> int:
+    """How many runtime switches this process has applied; a change means the stored text may need a new scrub."""
+    _poll_privacy()
+    return _switches
 
 
 def runtime_privacy() -> bool | None:
@@ -322,7 +329,7 @@ def _expire_full_text() -> None:
 
 
 def _poll_privacy(force: bool = False) -> None:
-    global _flag_mtime, _flag_checked, _runtime, _until
+    global _flag_mtime, _flag_checked, _runtime, _until, _switches
     if _flag is None:
         return
     if _until and _clock() >= _until:
@@ -349,6 +356,7 @@ def _poll_privacy(force: bool = False) -> None:
         _until = float(u) if v is False and isinstance(u, (int, float)) and not isinstance(u, bool) else 0.0
         set_privacy(v)
         _runtime = v
+        _switches += 1
         if _until and _clock() >= _until:
             _expire_full_text()
 
@@ -366,7 +374,7 @@ def watch_privacy(log_dir: Path) -> None:
 def write_privacy(log_dir: Path, on: bool, until: float | None = None) -> None:
     """Flip privacy now for this process and (via the flag file) for every process logging into log_dir.
     `until` (only with on=False) = the full-text window: privacy returns by itself at that time."""
-    global _flag_mtime, _runtime, _until
+    global _flag_mtime, _runtime, _until, _switches
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     tmp = log_dir / (PRIVACY_FILE + ".tmp")
@@ -378,6 +386,7 @@ def write_privacy(log_dir: Path, on: bool, until: float | None = None) -> None:
     _until = float(until) if until and not on else 0.0
     set_privacy(on)
     _runtime = bool(on)
+    _switches += 1
     if _flag is not None and _flag == log_dir / PRIVACY_FILE:
         try:
             _flag_mtime = _flag.stat().st_mtime       # our own write: already applied

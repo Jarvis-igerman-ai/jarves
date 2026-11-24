@@ -198,7 +198,7 @@ def test_1557_core_tick_scrub_runs_off_the_loop_and_a_crash_is_logged_once(ctx, 
     monkeypatch.setattr(logs, "privacy", lambda: True)
     monkeypatch.setattr(logs, "error", lambda *a, **k: errors.append(a[1]))
 
-    def boom(home):
+    def boom(home, **k):
         seen.append(threading.get_ident())
         raise RuntimeError("unexpected")
     monkeypatch.setattr(privacy, "scrub_stored_text", boom)
@@ -217,7 +217,7 @@ def test_1557_core_tick_scrub_runs_off_the_loop_and_a_crash_is_logged_once(ctx, 
     asyncio.run(ops._after_tick())
     assert seen and all(t != loop_thread for t in seen) and len(seen) == 2
     assert errors == ["PRIVACY_SCRUB_FAILED"] and ops._privacy_scrubbed is False
-    monkeypatch.setattr(privacy, "scrub_stored_text", lambda home: {"ledger": 0, "plan_steps": 0})
+    monkeypatch.setattr(privacy, "scrub_stored_text", lambda home, **k: {"ledger": 0, "plan_steps": 0})
     asyncio.run(ops._after_tick())                         # review R3: a success re-arms the log
     assert ops._privacy_scrubbed is True and ops._privacy_scrub_logged is False
     ops._privacy_scrubbed = False
@@ -233,3 +233,84 @@ def test_1557_the_switch_waits_briefly_and_leaves_a_busy_database_to_the_tick(ct
     privacy.set_privacy(ctx, True)
     privacy.set_full_text(ctx, False)
     assert seen and all(t == privacy.HANDLER_TIMEOUT_S < privacy.TICK_TIMEOUT_S for t in seen)
+
+
+def test_1557_a_blocked_scrub_warns_once_per_failure_run_not_every_tick(ctx, monkeypatch):
+    """Review R1 (round 3): the Core retries every tick; PRIVACY_SCRUB_PARTIAL must stay bounded."""
+    from jarves.operations import Operations
+    warns = []
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: warns.append(a[1]))
+    open_db(ctx.home).close()
+
+    def busy(cx):
+        raise sqlite3.OperationalError("checkpoint busy")
+    monkeypatch.setattr(privacy, "_checkpoint", busy)
+    ops = SimpleNamespace(core=SimpleNamespace(home=ctx.home), _privacy_scrubbed=False, _privacy_scrub_logged=False)
+    for _ in range(4):
+        Operations._privacy_scrub(ops)
+    assert warns == ["PRIVACY_SCRUB_PARTIAL"] and ops._privacy_scrubbed is False
+    monkeypatch.setattr(privacy, "_checkpoint", lambda cx: None)
+    Operations._privacy_scrub(ops)                          # done: a later failure run warns again
+    assert ops._privacy_scrubbed is True and ops._privacy_scrub_logged is False
+
+
+@pytest.mark.parametrize("switch", ["privacy", "full_text"])
+def test_1557_an_unexpected_scrub_error_does_not_fail_the_switch(ctx, monkeypatch, switch):
+    """Review R2 (round 3): the switch is saved first; any scrub error is logged and left to the Core's tick."""
+    errors = []
+    monkeypatch.setattr(logs, "error", lambda *a, **k: errors.append(a[1]))
+
+    def odd(home, timeout):
+        raise AttributeError("odd stored shape")
+    monkeypatch.setattr(privacy, "_scrub_ledger", odd)
+    res = privacy.set_privacy(ctx, True) if switch == "privacy" else privacy.set_full_text(ctx, False)
+    assert res["privacy"] is True and logs.privacy() is True
+    assert errors == ["PRIVACY_SCRUB_FAILED"]
+
+
+def test_1557_an_off_on_switch_between_two_ticks_scrubs_again(ctx, monkeypatch):
+    """Review R3 (round 3): the tick re-arms on the switch count, not only on a privacy-off sample."""
+    from jarves.operations import Operations
+    calls, count = [], [0]
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    monkeypatch.setattr(logs, "privacy_switches", lambda: count[0])
+    monkeypatch.setattr(privacy, "scrub_stored_text", lambda home, **k: calls.append(1) or {"ledger": 0, "plan_steps": 0})
+    ops = SimpleNamespace(core=SimpleNamespace(home=ctx.home), _privacy_scrubbed=False, _privacy_scrub_logged=False)
+    Operations._privacy_scrub(ops)
+    Operations._privacy_scrub(ops)
+    assert len(calls) == 1                                   # nothing changed: no second pass
+    count[0] += 1                                            # off, then on again, both between two ticks
+    Operations._privacy_scrub(ops)
+    assert len(calls) == 2
+
+
+def test_1557_a_flag_file_written_by_another_process_counts_as_a_switch(ctx, monkeypatch):
+    """Review R3 (round 3): another process's write to privacy.json (seen once, already back on) bumps the count."""
+    import os
+    flag = ctx.home / "logs" / logs.PRIVACY_FILE
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text(json.dumps({"privacy": True, "at": 1}), encoding="utf-8")
+    monkeypatch.setattr(logs, "_flag", flag)
+    monkeypatch.setattr(logs, "_flag_mtime", flag.stat().st_mtime)
+    monkeypatch.setattr(logs, "_switches", 0)
+    monkeypatch.setattr(logs, "_flag_checked", float("-inf"))
+    before = logs.privacy_switches()
+    flag.write_text(json.dumps({"privacy": True, "at": 2}), encoding="utf-8")   # off -> on happened in between
+    os.utime(flag, (flag.stat().st_mtime + 5,) * 2)
+    monkeypatch.setattr(logs, "_flag_checked", float("-inf"))
+    assert logs.privacy_switches() == before + 1
+
+
+def test_1557_runner_step_reasons_are_never_free_literals():
+    """Review R4 (round 3): every _block/_fail reason in goal_plans.py is a named constant (or a failure code), so
+    reason_at_rest keeps it instead of reducing it to "details not kept"."""
+    import ast
+    import inspect
+    from jarves import goal_plans
+    calls = [n for n in ast.walk(ast.parse(inspect.getsource(goal_plans)))
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in ("_block", "_fail")]
+    assert len(calls) >= 10
+    for c in calls:
+        literals = [x.value for x in ast.walk(c.args[2]) if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+        assert set(literals) <= {": "}, (c.lineno, literals)       # ": " only joins a code to its (privacy-safe) text

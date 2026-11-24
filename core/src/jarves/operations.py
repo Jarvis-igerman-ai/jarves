@@ -197,7 +197,8 @@ class Operations:
         self.core = core
         home = core.home
         self._privacy_scrubbed = False           # #1557: the older stored text was scrubbed since privacy went on
-        self._privacy_scrub_logged = False       # an unexpected scrub error was logged (once per failure run)
+        self._privacy_scrub_logged = False       # a scrub failure was logged (once per failure run)
+        self._privacy_switches = None            # logs.privacy_switches() at the last complete scrub
         self.db = open_db(home)
         self.alerts = alerts_mod.AlertEngine(self.db, outputs={"popup": PopupOutput(core), "speech": SpeechOutput(core),
                                                                "os": OSOutput(core)})
@@ -394,14 +395,18 @@ class Operations:
 
     def _privacy_scrub(self) -> None:
         """#1557: once privacy is on (at start, switched by another process, or a full-text window ended), remove the
-        text kept on disk from before; again after every off -> on change. A failed attempt is retried next tick."""
-        on = logs.privacy()
-        if on and not self._privacy_scrubbed:
+        text kept on disk from before; again after every runtime switch, even an off -> on between two ticks.
+        A failed attempt is retried next tick; its warning is written once per failure run, not every tick."""
+        on, switches = logs.privacy(), logs.privacy_switches()
+        if on and (not self._privacy_scrubbed or switches != getattr(self, "_privacy_switches", None)):
             from . import privacy as privacy_mod
-            res = privacy_mod.scrub_stored_text(self.core.home)
+            res = privacy_mod.scrub_stored_text(self.core.home, warn=not self._privacy_scrub_logged)
             on = None not in res.values()
+            if not on:
+                self._privacy_scrub_logged = True
         self._privacy_scrubbed = bool(on)
         if on:
+            self._privacy_switches = switches
             self._privacy_scrub_logged = False   # a later failure is logged again
 
     async def stop(self) -> None:
