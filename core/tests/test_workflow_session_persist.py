@@ -84,7 +84,7 @@ class SessionPersistTests(unittest.TestCase):
         now = time.time()
         good, old, far = "a" * 64, "b" * 64, "c" * 64
         (self.home / "sessions.json").write_text(json.dumps({"sessions": {
-            good: now + 60, old: now - 1, far: now + 10 * srv.SESSION_TTL_S, "nothex": now + 60}}), encoding="utf-8")
+            good: now + 60, old: now - 1, far: now + srv.unlock.UNLOCK_TTL_S + 60, "nothex": now + 60}}), encoding="utf-8")
         self.assertEqual(set(srv.load_sessions(self.home, now)), {good})
         (self.home / "sessions.json").write_text("{broken", encoding="utf-8")
         self.assertEqual(srv.load_sessions(self.home, now), {})

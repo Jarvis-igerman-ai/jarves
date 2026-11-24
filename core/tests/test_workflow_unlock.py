@@ -201,6 +201,65 @@ class UnlockTests(unittest.TestCase):
         self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
         self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
 
+    def owner_window_then_new_code(self):
+        """The owner's window unlocks once (proving it holds terminal codes), the unlock lapses, a new code is shown."""
+        owner = self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+        self.server.unlocked.clear()
+        shown = unlock.issue(self.home)
+        return owner, shown, "0000" if shown != "0000" else "1111"
+
+    def token_windows_try(self, wrong, tries=(3, 2)):
+        for n in tries:                                                # #1416: 3 + 2 from two token-only windows
+            self.cookie = ""
+            self.login()
+            self.assertEqual([self.wrong_try(wrong)[0] for _ in range(n)], [403] * n)
+
+    def test_token_windows_cannot_cancel_the_code_for_the_owner_window_1416(self):
+        owner, shown, wrong = self.owner_window_then_new_code()
+        self.token_windows_try(wrong)
+        self.assertTrue((self.home / unlock.FILE).exists())           # not cancelled
+        self.assertEqual(self.wrong_try(shown), (403, "shared_exhausted"))  # token windows got their 5 tries
+        self.cookie = ""
+        self.login()
+        self.assertEqual(self.wrong_try(shown), (403, "shared_exhausted"))  # and a fresh window gets none
+        self.cookie = f"{self.server.cookie}={owner}"
+        self.assertEqual(self.wrong_try(shown), (200, None))           # the owner's window still unlocks
+
+    def test_owner_window_has_its_own_3_tries_outside_the_shared_total_1416(self):
+        owner, shown, wrong = self.owner_window_then_new_code()
+        self.assertEqual([self.wrong_try(wrong)[1] for _ in range(4)], [None] * 3 + ["session_exhausted"])
+        self.assertEqual(self.server.unlock_wrong.total, 0)
+        self.token_windows_try(wrong)                                  # guess bound: 5 shared + 3 per owner window
+        self.assertEqual(self.wrong_try(shown), (403, "shared_exhausted"))
+
+    def test_owner_window_survives_a_restart_1416(self):
+        owner, shown, wrong = self.owner_window_then_new_code()
+        self.tearDown_server_only()
+        self.server = Server(self.home, 0)                              # restart: same home, sessions.json reloaded
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.assertEqual(len(self.server.owner_windows), 1)
+        self.token_windows_try(wrong)
+        self.cookie = f"{self.server.cookie}={owner}"
+        self.assertEqual(self.wrong_try(shown), (200, None))
+        self.assertGreater(self.server.sessions[owner], __import__("time").time() + 7 * 86400 - 60)  # end was stored
+
+    def test_damaged_owner_list_means_no_owner_window_1416(self):
+        from jarves.workflow.server import load_owner_windows
+        sid = self.login()
+        stored = json.loads((self.home / "sessions.json").read_text(encoding="utf-8"))
+        for bad in ({"x": 1}, [1, {"y": 2}, "f" * 64], "nope"):        # unknown digest, wrong types, not a list
+            stored["owner"] = bad
+            (self.home / "sessions.json").write_text(json.dumps(stored), encoding="utf-8")
+            self.assertEqual(load_owner_windows(self.home, {"f" * 64: 1.0} if bad == "nope" else {}), set(), bad)
+        self.assertTrue(sid)
+
+    def tearDown_server_only(self):
+        self.server.shutdown()
+        self.thread.join(5)
+        self.server.server_close()
+
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()
         self.assertFalse((self.home / unlock.FILE).exists())
