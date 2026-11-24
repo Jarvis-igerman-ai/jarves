@@ -41,6 +41,12 @@ KEYS = [
     "my secret is xyz9876",
     "secret: hunter2",
     "client_secret=abc",
+    # review of #1711 R1: a long hex key in dash-separated groups is judged by its joined length
+    "remember " + "-".join(["4f9c2b7e8a1d3f6c"] * 4),
+    # review of #1711 R2: "my ... key/token/secret is X" refuses any 6+ char value, digits or not
+    "my api key is hunterfoobar",
+    "my token is qwertyuiop",
+    "הטוקן שלי הוא abcdefgh",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -70,6 +76,8 @@ PLAIN = [
     "play the Rapi Key: Live album",
     "api keyboard: logitech",
     "private keynote: monday",
+    "my favourite token is the blue one",                                # possessive, short value: not a key
+    "the api key is hunterfoobar",                                       # not possessive: digit rule still applies
 ]
 
 
