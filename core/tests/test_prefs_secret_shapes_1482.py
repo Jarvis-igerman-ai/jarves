@@ -21,6 +21,9 @@ def _b62(seed: str, n: int) -> str:
 
 SHA40 = _hex("commit", 40)
 SHA_DIGITS = "cc1234567fe87a1b2"        # a short SHA with 6+ digits in a row (the long-number rule refused it)
+SHA40_DIGITS = ("ab1234567" + _hex("d40", 40))[:40]       # a 40-char SHA with a run of 6+ digits
+SHA256_DIGITS = ("ab1234567" + _hex("d64", 64))[:64]      # named digests with a run of 6+ digits
+SHA512_DIGITS = ("cd7654321" + _hex("d128", 128))[:128]
 
 LEAKY = [
     _hex("bare32", 32), _hex("bare64", 64), _hex("upper", 32).upper(), _hex("h48", 48),
@@ -87,6 +90,29 @@ def test_random_base62_tokens_are_refused_at_a_pinned_rate():
     for n, floor in ((20, 0.85), (24, 0.90), (32, 0.97)):
         refused = sum(looks_sensitive("use " + _b62(f"rate-{n}-{i}", n)) for i in range(1000))
         assert refused >= floor * 1000, (n, refused)
+
+
+@pytest.mark.parametrize("text", ["token 3f9c2ab4e1d07b5a", "apikey: a1b2c3d4e5f6a7b8c9d0", "my password is c0ffee7ab",
+                                  "הטוקן 3f9c2ab4e1d07b5a"])
+def test_short_hex_next_to_a_credential_word_is_refused(text):
+    assert looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["the key was defaced", "keys: accede and effaced"])
+def test_letters_only_hex_words_next_to_a_credential_word_are_allowed(text):
+    assert not looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", [SHA40_DIGITS, "fixed in " + SHA40_DIGITS, "use " + SHA40_DIGITS + " here"])
+def test_bare_40_hex_with_a_digit_run_keeps_the_long_number_rule(text):
+    # Same as main: without a hash word or a commit URL, a 40-hex value with 6+ digits in a row is refused.
+    assert looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["fixed in commit " + SHA40_DIGITS, "https://github.com/MyOrg/Repo/commit/" + SHA40_DIGITS,
+                                  "sha256 " + SHA256_DIGITS + " of the installer", "sha512 checksum " + SHA512_DIGITS])
+def test_named_shas_and_digests_with_a_digit_run_are_allowed(text):
+    assert not looks_sensitive(text), text
 
 
 def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):

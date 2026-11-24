@@ -68,10 +68,11 @@ def _base32(text: str) -> bool:
     return False
 
 
-# #1482: secret shapes without a vendor prefix. A git commit SHA (7-40 hex, 2+ letters a-f, one letter case) is allowed.
+# #1482: secret shapes without a vendor prefix. SHA-shaped: 7+ hex, 2+ letters a-f, one letter case. A git commit SHA
+# or a named digest is allowed; any SHA-shaped value with a digit next to a credential word is refused.
 _B = r"(?<![0-9A-Za-z])"
-_SHA = re.compile(_B + r"(?=(?:\d*[a-f]){2})[0-9a-f]{7,40}(?![0-9A-Za-z])|"
-                  + _B + r"(?=(?:\d*[A-F]){2})[0-9A-F]{7,40}(?![0-9A-Za-z])")
+_SHA = re.compile(_B + r"(?=(?:\d*[a-f]){2})[0-9a-f]{7,}(?![0-9A-Za-z])|"
+                  + _B + r"(?=(?:\d*[A-F]){2})[0-9A-F]{7,}(?![0-9A-Za-z])")
 _HEX = re.compile(_B + r"[0-9a-fA-F]{32,}(?![0-9A-Za-z])")
 _ALNUM = re.compile(_B + r"[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
 # Credential words: glued or separated qualifier (apikey, GITHUB_TOKEN, client secret) and plurals. Bare api/auth do not
@@ -115,14 +116,19 @@ def _secret_shaped(t: str) -> bool:
         allowed = one_case and (len(run) == 40 or len(run) in (32, 64, 128) and _hash_named(t, m))
         if _cred_near(t, m) or not allowed:   # a bare 40-hex is taken as a git SHA (old 40-hex tokens: safe-side gap)
             return True
+    # A shorter SHA-shaped value next to a credential word ("token 3f9c2ab4e1d07b5a"). A digit is required so that
+    # hex-letter words ("the key was defaced") stay allowed.
+    if any(re.search(r"\d", m.group(0)) and _cred_near(t, m) for m in _SHA.finditer(t)):
+        return True
     return any(_random_mixed(m.group(0)) for m in _ALNUM.finditer(t))
 
 
 def _drop_sha(m: re.Match) -> str:
-    """Hide a commit SHA from the long-number rule when it is 40 chars or named by a hash word and no credential word
-    is near; other digit-heavy hex ids ("my id is 12345678ab") stay refused."""
-    t = m.string
-    keep = _cred_near(t, m) or not (len(m.group(0)) == 40 or _hash_named(t, m))
+    """Hide a commit SHA (7-40 chars) or a digest (32/64/128) from the long-number rule only when a hash word or a
+    /commit/ URL names it and no credential word is near. A bare SHA keeps the rule, as on main: "fixed in <40-hex with
+    6+ digits>" and "my id is 12345678ab" stay refused."""
+    t, n = m.string, len(m.group(0))
+    keep = _cred_near(t, m) or not ((n <= 40 or n in (64, 128)) and _hash_named(t, m))
     return m.group(0) if keep else " "
 
 
