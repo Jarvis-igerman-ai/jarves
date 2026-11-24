@@ -12,13 +12,16 @@ from jarves.projectmgr import gitops
 
 @pytest.fixture(autouse=True)
 def _owner_home(tmp_path, monkeypatch):
-    """An empty global config of our own, so the host's ~/.gitconfig cannot shape the result."""
+    """An empty global config of our own and no system config, so the host's git config cannot shape the result
+    (Git for Windows ships a system `filter.lfs`)."""
     home = tmp_path / "owner-home"
     home.mkdir()
     (home / ".gitconfig").write_text("[user]\n\tname = Owner\n\temail = owner@example.invalid\n", encoding="utf-8")
     for k in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(k, str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
     return home
 
 
@@ -163,6 +166,67 @@ def test_submodules_are_never_recursed_into(tmp_path):
     assert not marker.exists()
 
 
+def _touch(path: Path, n: int) -> None:
+    import os
+    os.utime(path, (1_000_000_000 + n, 1_000_000_000 + n))                        # stat-dirty, same content
+
+
+def test_a_populated_submodule_is_never_checked_with_its_own_filters(tmp_path):
+    """Round-3 review R2: in the superproject, status, diff, add and merge look inside each populated submodule to
+    see whether it is dirty; that child git reads `.git/modules/<s>/config` and runs its clean filter on a
+    stat-dirty file, even with `submodule.<s>.ignore=none` set locally. JARVES runs none of it, and a gitlink
+    change still shows."""
+    (tmp_path / "s").mkdir()
+    sub, marker = _repo(tmp_path / "s"), tmp_path / "ran.txt"
+    repo = _repo(tmp_path)
+    subprocess.run(["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "sub"], cwd=repo,
+                   check=True, capture_output=True)
+    gitops.git(repo, "commit", "-qm", "sub", "--no-verify")
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "side.txt").write_text("s", encoding="utf-8")
+    gitops.git(repo, "add", "side.txt")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    mod = repo / ".git" / "modules" / "sub"
+    _cfg(repo, "filter.evil.clean", _sh(marker), file=str(mod / "config"))
+    (mod / "info").mkdir(exist_ok=True)
+    (mod / "info" / "attributes").write_text("* filter=evil\n", encoding="utf-8")
+    _cfg(repo, "submodule.sub.ignore", "none")
+    _touch(repo / "sub" / "f.txt", 1)
+    subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True,
+                   env=gitops.child_env())
+    assert marker.exists()                                                         # the setup itself works
+    marker.unlink()
+    for n, call in enumerate((lambda: gitops.git(repo, "status", "--porcelain"), lambda: gitops.git(repo, "diff"),
+                              lambda: gitops.commit_all(repo, "x"), lambda: gitops.merge_in(repo, "side")), 2):
+        _touch(repo / "sub" / "f.txt", n)
+        call()
+    assert not marker.exists() and (repo / "side.txt").exists()
+    gitops.git(sub, "commit", "-qm", "e", "--allow-empty", "--no-verify")
+    subprocess.run(["git", "-C", "sub", "pull", "-q", "--no-rebase", "origin", "main"], cwd=repo, check=True,
+                   capture_output=True)
+    gitops.git(repo, "add", "sub")
+    gitops.git(repo, "commit", "-qm", "bump", "--no-verify")
+    assert gitops.changed_files(repo, "HEAD~1") == ["sub"]                         # gitlink changes still show
+
+
+def test_blanked_diff_drivers_do_not_break_a_merge(tmp_path):
+    """Round-3 review R7: a merge (git prints its diffstat by default) with a `diff=evil` attribute and a shared
+    textconv still merges, and the textconv never runs."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "f.txt").write_text("side\n", encoding="utf-8")
+    gitops.git(repo, "commit", "-qam", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "g.txt").write_text("g\n", encoding="utf-8")
+    gitops.git(repo, "add", "g.txt")
+    gitops.git(repo, "commit", "-qm", "g", "--no-verify")
+    _cfg(repo, "diff.evil.textconv", _sh(marker))
+    _attrs(repo, "* diff=evil\n")
+    assert gitops.merge_in(repo, "side") == [] and (repo / "f.txt").read_text(encoding="utf-8") == "side\n"
+    assert not marker.exists()
+
+
 def test_a_shared_filter_with_the_owners_filter_name_fails_closed(tmp_path, _owner_home):
     """Review R3: blanking a filter the owner's config also defines (Git LFS) would silently commit binaries
     instead of pointers; JARVES refuses with a message instead."""
@@ -177,14 +241,22 @@ def test_a_shared_filter_with_the_owners_filter_name_fails_closed(tmp_path, _own
 def test_global_options_before_the_subcommand_are_refused(tmp_path):
     """Review R4: the config is read in `cwd`; `-C` or `--git-dir` would run git in another repository."""
     repo = _repo(tmp_path)
-    for args in (("-C", str(tmp_path), "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status")):
+    for args in (("-C", str(tmp_path), "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status"),
+                 ("--exec-path=x", "status"), ("--bare", "status"), ("-p", "log"), ("--literal-pathspecs", "add")):
         with pytest.raises(gitops.GitError, match="subcommand first"):
             gitops.git(repo, *args)
 
 
-def test_a_git_without_show_scope_names_the_minimum_version(monkeypatch, tmp_path):
-    """Review R5: git before 2.26 rejects --show-scope (exit 129); the error says which git JARVES needs."""
-    monkeypatch.setattr(gitops.subprocess, "run",
-                        lambda argv, **kw: subprocess.CompletedProcess(argv, 129, "", "error: unknown option"))
-    with pytest.raises(gitops.GitError, match=r"git 2\.26 or later"):
+def test_a_git_older_than_2_31_is_refused(monkeypatch, tmp_path):
+    """Round-3 review R1: git 2.26-2.30 accepts --show-scope but ignores GIT_CONFIG_COUNT, so every override would be
+    silently dropped (fails open). Below 2.31 JARVES runs no git command at all."""
+    calls: list = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "git version 2.30.2\n", "")
+    monkeypatch.setattr(gitops, "_GIT_OK", [])
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    with pytest.raises(gitops.GitError, match=r"git 2\.31 or later \(found: 2\.30\)"):
         gitops.git(tmp_path, "status")
+    assert calls == [["git", "version"]]                                           # nothing else ran

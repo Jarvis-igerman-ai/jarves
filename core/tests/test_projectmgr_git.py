@@ -26,6 +26,8 @@ def _fake_run(outcomes, calls):
     def run(argv, **kw):
         if argv[1:3] == ["config", "--show-scope"]:          # the #1390 shared-config read: not the command itself
             return subprocess.CompletedProcess(argv, 1, "", "")
+        if argv[1:] == ["version"]:                           # the #1390 git version check
+            return subprocess.CompletedProcess(argv, 0, "git version 2.43.0\n", "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
