@@ -68,7 +68,7 @@ def _custom(env: dict) -> bool:
     return isinstance(policy, dict) and policy.get("custom_branch_policies") is True
 
 
-def warnings(env: object, policies: object = None) -> list[str]:
+def advisories(env: object, policies: object = None) -> list[str]:
     out = []
     if isinstance(env, dict) and env.get("can_admins_bypass") is not False:
         out.append("administrators may bypass the required reviewer (untick 'Allow administrators to bypass')")
@@ -77,9 +77,11 @@ def warnings(env: object, policies: object = None) -> list[str]:
     if kinds and "User" not in kinds:
         out.append("only team reviewers are set; their members are not checked (add yourself as a User reviewer)")
     entries = policies.get("branch_policies") if isinstance(policies, dict) else None
-    if isinstance(entries, list) and not any(isinstance(e, dict) and e.get("type") == "tag" and e.get("name") == "v*.*.*" for e in entries):
-        # a broad tag rule (for example *) still passes; only the reviewer and the tag ruleset then guard the secrets
-        out.append("no tag deployment rule is exactly v*.*.* (a broader tag rule admits more tags)")
+    if isinstance(entries, list):
+        # any tag rule other than v*.*.* (for example *) still passes; only the reviewer and the tag ruleset then guard
+        broad = [str(e.get("name")) for e in entries if isinstance(e, dict) and e.get("type") == "tag" and e.get("name") != "v*.*.*"]
+        if broad:
+            out.append(f"tag deployment rules other than v*.*.* admit more tags ({', '.join(broad)[:200]})")
     return out
 
 
@@ -118,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     found = problems(env, policies)
     for p in found:
         print(f"::error::{ENV_NAME} is not protected, refusing the publish (#544): {p}")
-    for w in warnings(env, policies):
+    for w in advisories(env, policies):
         print(f"::warning::{ENV_NAME}: {w}")
     if not found:
         print(f"{ENV_NAME}: required reviewer and tag-only deployment policy present")

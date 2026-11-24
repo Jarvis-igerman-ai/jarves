@@ -26,7 +26,7 @@ TAG_ONLY = {"total_count": 1, "branch_policies": [{"name": "v*.*.*", "type": "ta
 
 def test_protected_environment_passes():
     assert guard.problems(PROTECTED, TAG_ONLY) == []
-    assert guard.warnings(PROTECTED) == []
+    assert guard.advisories(PROTECTED) == []
 
 
 def test_unprotected_or_malformed_environment_is_refused():
@@ -83,8 +83,8 @@ def test_policies_fetched_only_for_a_custom_policy(monkeypatch, capsys):
 def test_admin_bypass_is_a_warning(tmp_path, capsys):
     # R2: GitHub defaults can_admins_bypass to true; report it, do not refuse
     bypass = dict(PROTECTED, can_admins_bypass=True)
-    assert guard.problems(bypass, TAG_ONLY) == [] and guard.warnings(bypass)
-    assert guard.warnings({k: v for k, v in PROTECTED.items() if k != "can_admins_bypass"})
+    assert guard.problems(bypass, TAG_ONLY) == [] and guard.advisories(bypass)
+    assert guard.advisories({k: v for k, v in PROTECTED.items() if k != "can_admins_bypass"})
     env, pol = tmp_path / "e.json", tmp_path / "p.json"
     env.write_text(json.dumps(bypass), encoding="utf-8")
     pol.write_text(json.dumps(TAG_ONLY), encoding="utf-8")
@@ -126,8 +126,8 @@ def test_broad_tag_rule_passes_with_a_warning():
     # review R2: a tag rule other than exactly v*.*.* is not refused, but it is reported
     broad = {"total_count": 1, "branch_policies": [{"name": "*", "type": "tag"}]}
     assert guard.problems(PROTECTED, broad) == []
-    assert any("v*.*.*" in w for w in guard.warnings(PROTECTED, broad))
-    assert guard.warnings(PROTECTED, TAG_ONLY) == []
+    assert any("v*.*.*" in w for w in guard.advisories(PROTECTED, broad))
+    assert guard.advisories(PROTECTED, TAG_ONLY) == []
 
 
 def test_reviewer_entry_must_be_a_user_or_team_with_an_id():
@@ -138,6 +138,12 @@ def test_reviewer_entry_must_be_a_user_or_team_with_an_id():
         assert any("reviewer" in p for p in guard.problems(with_reviewers(junk), TAG_ONLY)), junk
     team_only = with_reviewers({"type": "Team", "reviewer": {"slug": "t", "id": 9}})
     assert guard.problems(team_only, TAG_ONLY) == []
-    assert any("team" in w for w in guard.warnings(team_only, TAG_ONLY))
-    assert guard.warnings(PROTECTED, TAG_ONLY) == []
+    assert any("team" in w for w in guard.advisories(team_only, TAG_ONLY))
+    assert guard.advisories(PROTECTED, TAG_ONLY) == []
 
+
+def test_exact_plus_broad_tag_rule_still_warns():
+    # #1715 council: the exact rule next to a broad one must not hide the broad one
+    both = {"total_count": 2, "branch_policies": [{"name": "v*.*.*", "type": "tag"}, {"name": "*", "type": "tag"}]}
+    assert guard.problems(PROTECTED, both) == []
+    assert any("(*)" in w for w in guard.advisories(PROTECTED, both))
