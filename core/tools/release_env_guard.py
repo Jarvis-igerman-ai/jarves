@@ -1,12 +1,14 @@
 """Refuse a real stable publish unless `stable-release` is a protected environment (#544).
 
 GitHub creates an environment named by a job on first use WITHOUT protection rules, so `environment: stable-release`
-alone does not keep RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY behind the owner. This reads the environment over the
-GitHub API (read-only) and exits 1 unless it has a required reviewer AND a custom deployment branch/tag policy
-(the owner settings in docs/RELEASING.md, steps 3-4). Any API or parse failure also refuses (fail closed).
+alone does not keep RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY behind the owner. This reads the environment and its
+deployment policies over the GitHub API (read-only) and exits 1 unless it has a required reviewer AND a custom policy
+made only of tag rules (at least one, no branch rule). That is docs/RELEASING.md "Owner settings", step 3; the tag
+ruleset (step 2) and where the secrets live (step 4) cannot be read here. `can_admins_bypass: true` is a warning only.
+Any API or parse failure also refuses (fail closed).
 
     python core/tools/release_env_guard.py --repo OWNER/REPO          # uses `gh api` (GH_TOKEN)
-    python core/tools/release_env_guard.py --from-file env.json       # offline check of a saved response
+    python core/tools/release_env_guard.py --from-file env.json --policies-file policies.json   # offline check
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ import sys
 ENV_NAME = "stable-release"
 
 
-def problems(env: object) -> list[str]:
+def problems(env: object, policies: object) -> list[str]:
     """Reasons the environment does not protect the release secrets; empty means protected."""
     if not isinstance(env, dict):
         return ["the environment response is not a JSON object"]
@@ -32,15 +34,34 @@ def problems(env: object) -> list[str]:
     policy = env.get("deployment_branch_policy")
     if not (isinstance(policy, dict) and policy.get("custom_branch_policies") is True):
         out.append("deployments are not limited to selected tags (add the tag rule v*.*.*)")
+    entries = policies.get("branch_policies") if isinstance(policies, dict) else None
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        out.append("the deployment policy list is not readable")
+    else:
+        if not any(e.get("type") == "tag" for e in entries):
+            out.append("no tag deployment rule is set (add the tag rule v*.*.*)")
+        branches = [str(e.get("name")) for e in entries if e.get("type") != "tag"]
+        if branches:
+            out.append(f"branch deployment rules are allowed ({', '.join(branches)[:200]}); keep only the tag rule")
     return out
 
 
-def _fetch(repo: str) -> object:
-    res = subprocess.run(["gh", "api", f"repos/{repo}/environments/{ENV_NAME}"],
-                         capture_output=True, text=True, timeout=60, check=False)
+def warnings(env: object) -> list[str]:
+    if isinstance(env, dict) and env.get("can_admins_bypass") is not False:
+        return ["administrators may bypass the required reviewer (untick 'Allow administrators to bypass')"]
+    return []
+
+
+def _gh(path: str) -> object:
+    res = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=60, check=False)
     if res.returncode != 0:
-        raise RuntimeError(f"gh api failed ({res.returncode}): {res.stderr.strip()[:300]}")
+        raise RuntimeError(f"gh api {path} failed ({res.returncode}): {res.stderr.strip()[:300]}")
     return json.loads(res.stdout)
+
+
+def _load(path: str) -> object:
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,19 +69,24 @@ def main(argv: list[str] | None = None) -> int:
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--repo")
     src.add_argument("--from-file")
+    ap.add_argument("--policies-file", help="with --from-file: saved deployment-branch-policies response")
     args = ap.parse_args(argv)
+    if args.from_file and not args.policies_file:
+        ap.error("--from-file needs --policies-file")
     try:
         if args.from_file:
-            with open(args.from_file, encoding="utf-8") as fh:
-                env = json.load(fh)
+            env, policies = _load(args.from_file), _load(args.policies_file)
         else:
-            env = _fetch(args.repo)
+            base = f"repos/{args.repo}/environments/{ENV_NAME}"
+            env, policies = _gh(base), _gh(f"{base}/deployment-branch-policies")
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"::error::cannot read the {ENV_NAME} environment, refusing the publish (#544): {exc}")
         return 1
-    found = problems(env)
+    found = problems(env, policies)
     for p in found:
         print(f"::error::{ENV_NAME} is not protected, refusing the publish (#544): {p}")
+    for w in warnings(env):
+        print(f"::warning::{ENV_NAME}: {w}")
     if not found:
         print(f"{ENV_NAME}: required reviewer and tag-only deployment policy present")
     return 1 if found else 0
