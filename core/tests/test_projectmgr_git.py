@@ -283,7 +283,8 @@ def test_drivers_and_programs_named_by_the_shared_config_never_run(tmp_path):
     conflicting merge (merge driver) and the signed ship merge (gpg.program) run none of the repository's commands."""
     marker, home = tmp_path / "ran.txt", tmp_path / "home"
     repo = _driver_repo(tmp_path, marker)
-    subprocess.run(["git", "diff", "HEAD~1"], cwd=repo, capture_output=True)        # the setup itself works
+    (repo / "f.txt").write_text("changed\n", encoding="utf-8")       # plain git runs the filter on a changed file
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, capture_output=True)         # the setup itself works
     assert marker.exists()
     marker.unlink()
     gitops.ensure_integration(home, str(repo), 1)
