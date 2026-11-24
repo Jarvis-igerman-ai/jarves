@@ -2,6 +2,12 @@
 
 Each test injects a reword (the model's edit, which re-proposes the item) between what the surface showed and the
 confirm. Before the fix every surface ran the unguarded confirm and the NEW words ended up confirmed unseen."""
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from jarves import cli, dashboard, preferences as prefs_mod
@@ -173,10 +179,73 @@ async def test_every_approval_path_for_pref_confirm_runs_approval_meta(home, ori
     assert r.ok and len(calls) == 1 and p.for_prompt() == [OLD]
 
 
+_CLICK_CONFIRM = r"""
+const calls = [];
+const el = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.flat(Infinity), addEventListener() {} });
+let tree = [];
+Object.assign(global, {
+  window: {}, PAGES: {}, JL: { t: (s) => s }, tx: (he, en) => en, el, route: () => {},
+  pill: (k, t) => el("span", {}, t), header: (t) => el("h1", {}, t), render: (...k) => { tree = k.flat(Infinity); },
+  api: async (path, opts) => {
+    if (!opts) return { proposed: [{ id: "p1", text: process.argv[2], topic: "other" }], items: [], declined: [], topics: ["other"] };
+    calls.push([path, JSON.parse(opts.body)]); return {};
+  },
+});
+require(process.argv[1]);
+const buttons = (n, out) => { if (n && typeof n === "object") { if (n.tag === "button") out.push(n); (n.kids || []).forEach((k) => buttons(k, out)); } return out; };
+(async () => {
+  await PAGES.preferences();
+  buttons({ kids: tree }, []).find((b) => b.kids.includes("Confirm, remember it")).attrs.onclick();
+  await new Promise((r) => setTimeout(r, 0));
+  console.log(JSON.stringify(calls));
+})();
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
 def test_dashboard_confirm_button_posts_the_shown_words():
-    # review R1: the page must send {text} in the POST body, or every dashboard confirm gets PREF_TEXT_REQUIRED.
-    import pathlib, re
-    js = (pathlib.Path(prefs_mod.__file__).parent / "dashboard_static" / "pillars.js").read_text(encoding="utf-8")
-    assert re.search(r'const op = \(id, o, extra\) => act\(msg, \(\) => post\("/api/prefs/op", '
-                     r'Object\.assign\(\{ op: o, id: id \}, extra \|\| \{\}\)\)\)', js)
-    assert 'op(p.id, "confirm", { text: p.text })' in js
+    # review R1 (#1680): run the real page in node and click Confirm; the POST body must carry the words the card shows,
+    # or every dashboard confirm gets 400 PREF_TEXT_REQUIRED. Behavioural: no grep of the source.
+    js = Path(prefs_mod.__file__).parent / "dashboard_static" / "pillars.js"
+    out = subprocess.run(["node", "-e", _CLICK_CONFIRM, str(js), OLD], capture_output=True, text=True, timeout=30,
+                         check=False)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == [["/api/prefs/op", {"op": "confirm", "id": "p1", "text": OLD}]]
+
+
+async def test_approval_meta_and_the_handler_get_the_same_args_object(home):
+    # review R2 (#1680): voice binding needs the registry to hand approval_meta and the handler ONE args object. Any
+    # tool with approval_meta goes through the same SkillRegistry.call path; pin it on the real pref_confirm.
+    p, pid = _proposed(home)
+    reg = registry(prefs=p, answer=True)
+    t = reg._tools["pref_confirm"][1]
+    seen: list = []
+    meta, handler = t.approval_meta, t.handler
+    t.approval_meta = lambda a: seen.append(a) or meta(a)
+
+    async def run(a):
+        seen.append(a)
+        return await handler(a)
+    t.handler = run
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert r.ok and len(seen) == 2 and seen[0] is seen[1]
+
+
+async def test_confirm_after_a_conflict_asks_again_and_is_not_a_cached_dead_end(home):
+    # review R3 (#1680): a PREF_CONFLICT is never replayed from a cache; the same call again shows the NEW words and works
+    p, pid = _proposed(home)
+    asked: list = []
+    reg = registry(prefs=p, answer=True, asked=asked)
+    real = reg.confirm
+
+    async def edit_once(prompt, **meta):
+        if len(asked) == 0:
+            p.edit(pid, NEW, by="voice", repropose=True)
+        return await real(prompt, **meta)
+    edit_once.accepts_meta = True
+    reg.confirm = edit_once
+    first = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert not first.ok and first.code == "PREF_CONFLICT"
+    second = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert second.ok and "cached" not in second.data and "already_done" not in second.data
+    assert [a[1]["details"]["preference"] for a in asked] == [OLD, NEW] and p.for_prompt() == [NEW]
