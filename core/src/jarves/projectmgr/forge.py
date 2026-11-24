@@ -165,9 +165,16 @@ def create_pr(repo: str, head: str, base: str, title: str, body: str) -> str:
 
 
 def pr_checks(repo: str, ref: str) -> list[dict]:
-    """CI of a PR (number, URL or branch): [{name, state, bucket}] (bucket: pass|fail|pending|skipping|cancel)."""
+    """CI of a PR (number, a jarves/p<N>/... branch or a URL of the recorded repo): [{name, state, bucket}]
+    (bucket: pass|fail|pending|skipping|cancel). gh follows a URL's own repository, not --repo (#1622 review R3)."""
+    rec, ref = _need(repo), str(ref).strip()
+    u = re.match(r"^https://github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)/?$", ref, re.I)
+    if u and u.group(1).lower() == rec.lower():
+        ref = u.group(2)
+    if not (ref.isascii() and ref.isdigit()) and not (re.match(r"^jarves/p\d+/[\w.\-/]+$", ref) and ".." not in ref):
+        raise ForgeError(f"JARVES reads checks only of a PR number, a jarves/p<N>/... branch or a {rec} PR URL")
     try:
-        out = gh(_need(repo), "pr", "checks", ref, "--json", "name,state,bucket")
+        out = gh(rec, "pr", "checks", ref, "--json", "name,state,bucket")
     except ForgeError as e:
         if "no checks" in str(e).lower():
             return []

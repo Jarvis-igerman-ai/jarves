@@ -1337,6 +1337,20 @@ def test_1622_gh_runs_outside_the_project_with_the_recorded_repo(fake_gh, tmp_pa
         assert c["argv"][:2] == ["auth", "status"] or (c["argv"][-1] == "--repo=o/r" and "evil" not in str(c["argv"]))
 
 
+def test_1622_pr_checks_refuses_a_ref_of_another_repository(fake_gh, tmp_path):
+    """#1622 review R3: gh resolves a PR URL to the URL's repository, ignoring --repo, so only the recorded repo's
+    URL (sent as its number), a PR number or a jarves/p<N>/... branch reaches gh."""
+    from jarves.projectmgr import forge
+    assert forge.pr_checks("o/r", "https://github.com/O/R/pull/9")[0]["bucket"] == "pass"
+    forge.pr_checks("o/r", "jarves/p1/t1-a1")
+    for bad in ("https://github.com/evil/x/pull/9", "https://github.com/o/r/pull/9#x", "--web", "main", "jarves/p1/../x",
+                "", "٩"):
+        with pytest.raises(forge.ForgeError, match="reads checks only of"):
+            forge.pr_checks("o/r", bad)
+    calls = [json.loads(x)["argv"] for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert [c[2] for c in calls] == ["9", "jarves/p1/t1-a1"] and all(c[-1] == "--repo=o/r" for c in calls)
+
+
 def test_1622_gh_env_git_reads_no_global_or_repository_config(tmp_path):
     """#1622 R3: real git with gh's environment (GIT_CONFIG_GLOBAL=os.devnull, which is `nul` on Windows) runs, finds
     no repository and ignores a planted ~/.gitconfig rewrite."""
