@@ -302,7 +302,7 @@ class Manager(StageEngine):
             counts[t["status"]] = counts.get(t["status"], 0) + 1
         return {"id": p["id"], "name": p["name"], "path": p["path"], "goal": p["goal"], "status": p["status"],
                 "check": p["check_cmd"], "runners": p["runners"], "brief": p["brief"], "counts": counts,
-                "github": p.get("github") or "off", "release_cmd": p.get("release_cmd") or [],
+                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "", "release_cmd": p.get("release_cmd") or [],
                 "flow": pl.describe(pl.parse(self._project_flow(p) or pl.DEFAULT_TEMPLATE, trusted=True)),
                 "total": len(ts), "branch": gitops.integration_branch(p["id"])}
 
@@ -375,7 +375,10 @@ class Manager(StageEngine):
                 return _res(False, "NOT_GITHUB", "this project's origin is not a github.com repository")
             f["github"], f["github_repo"] = github, slug      # #1622: gh only ever targets this recorded repo
         self.db.update_project(p["id"], **f)
-        return _res(True, "ok", "saved", project=self._pview(self.db.project(p["id"])))
+        text = "saved"
+        if f.get("github_repo"):      # trust on first use (#1622): the owner confirms the pinned target here
+            text += f"; GitHub {f['github']} will only ever use {f['github_repo']} (read from origin now: check it)"
+        return _res(True, "ok", text, project=self._pview(self.db.project(p["id"])))
 
     def github_status(self, project: str = "", **_) -> dict:
         p, err = self._need_project(project)

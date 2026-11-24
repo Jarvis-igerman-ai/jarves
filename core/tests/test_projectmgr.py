@@ -1222,7 +1222,8 @@ FAKE_GH = textwrap.dedent('''
     import json, os, sys
     a = sys.argv[1:]
     with open(os.path.join(os.path.dirname(__file__), "gh_calls.jsonl"), "a") as f:
-        f.write(json.dumps({"argv": a, "cwd": os.getcwd(), "git_dir": os.environ.get("GIT_DIR", "")}) + "\\n")
+        f.write(json.dumps({"argv": a, "cwd": os.getcwd(), "git_dir": os.environ.get("GIT_DIR", ""),
+                            "global": os.environ.get("GIT_CONFIG_GLOBAL", ""), "nosys": os.environ.get("GIT_CONFIG_NOSYSTEM", "")}) + "\\n")
     if a[:2] == ["auth", "status"]:
         sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
     if a[:2] == ["issue", "list"]:
@@ -1272,7 +1273,7 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
         assert url.endswith("/pull/9")
         checks = forge.pr_checks("o/r", "9")
         assert checks and checks[0]["bucket"] == "pass"
-        for bad in ("", "o", "o/r/x", "../r", "o/..", "o r/x", "--repo=x/y"):
+        for bad in ("", "o", "o/r/x", "../r", "o/..", "o r/x", "--repo=x/y", "-x/y", "o/-r"):
             with pytest.raises(forge.ForgeError):
                 forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     finally:
@@ -1289,7 +1290,8 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     open_project(m, repo)
     assert m.call("configure", project="demo", github="write", by="voice")["code"] == "CLI_ONLY"
     r = m.call("configure", project="demo", github="write")
-    assert r["ok"] and r["project"]["github"] == "write"
+    assert r["ok"] and r["project"]["github"] == "write" and r["project"]["github_repo"] == "o/r"
+    assert "o/r" in r["text"]                                        # the owner sees the pinned target (#1622)
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
@@ -1320,7 +1322,25 @@ def test_gh_never_runs_in_the_project_or_follows_its_config(fake_gh, tmp_path):
         assert not os.path.exists(c["cwd"])                          # a removed empty folder, not the project
         assert c["git_dir"] and not os.path.exists(c["git_dir"])     # gh's own git reads find no repository
         if c["argv"][:2] != ["auth", "status"]:
-            assert c["argv"][-2:] == ["--repo", "o/r"] and "evil" not in " ".join(c["argv"])
+            assert c["argv"][-1] == "--repo=o/r" and "evil" not in " ".join(c["argv"])
+        assert c["global"] == os.devnull and c["nosys"] == "1"       # nor the agent-writable ~/.gitconfig (#1622)
+
+
+def test_every_forge_gh_call_targets_the_recorded_repo():
+    """#1622: no caller hands gh the project path (or origin); each repo-taking forge call gets `github_repo`."""
+    import ast
+    import jarves
+    src = Path(jarves.__file__).parent
+    seen = 0
+    for py in src.rglob("*.py"):
+        if py.name == "forge.py":
+            continue
+        for n in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                    and n.func.value.id == "forge" and n.func.attr in ("status", "issues", "create_pr", "pr_checks")):
+                seen += 1
+                assert n.args and "github_repo" in ast.unparse(n.args[0]), f"{py.name}:{n.lineno}"
+    assert seen >= 1
 
 
 def test_github_status_uses_the_recorded_repo_not_todays_origin(env, fake_gh):

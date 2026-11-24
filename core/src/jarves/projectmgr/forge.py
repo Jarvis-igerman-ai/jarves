@@ -35,7 +35,8 @@ def repo_slug(path: str) -> str:
 
 
 def valid_repo(repo: str) -> bool:
-    return bool(_REPO.match(repo or "")) and not any(x in (".", "..") for x in repo.split("/"))
+    """owner/repo; neither part may be '.', '..' or start with '-' (never read as a gh option)."""
+    return bool(_REPO.match(repo or "")) and not any(x in (".", "..") or x.startswith("-") for x in repo.split("/"))
 
 
 def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -> str:
@@ -43,7 +44,8 @@ def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -
     `auth status`). gh never runs inside the project (#1622): its own git reads there (remotes, `url.*.insteadOf`,
     `core.fsmonitor`...) would bypass gitops.git(), and the shared config is agent-writable. It runs in a fresh empty
     folder with GIT_DIR pointing at a missing path, so any git command gh starts finds no repository and reads no
-    repository config; the target is always the explicit `--repo`."""
+    repository config, nor the user-global or system git config; the target is always the explicit `--repo=`. gh's
+    own login (GH_CONFIG_DIR / its config folder) is still read: it is the owner's sign-in."""
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
@@ -52,11 +54,12 @@ def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -
     with tempfile.TemporaryDirectory(prefix="jarves-gh-") as box:
         env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
                                 "GIT_DIR": os.path.join(box, "no-repo"), "GIT_CEILING_DIRECTORIES": box,
-                                "GIT_TERMINAL_PROMPT": "0"})
+                                "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
+                                "GIT_CONFIG_GLOBAL": os.devnull})     # agents share the user's HOME (~/.gitconfig)
         for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
             if os.environ.get(k):
                 env[k] = os.environ[k]
-        p = subprocess.run([*cmd, *args, *(["--repo", repo] if repo else [])], cwd=box, capture_output=True,
+        p = subprocess.run([*cmd, *args, *([f"--repo={repo}"] if repo else [])], cwd=box, capture_output=True,
                            text=True, timeout=timeout, env=env, creationflags=_NOWIN, input=input_,
                            encoding="utf-8", errors="replace")
     if p.returncode != 0:
