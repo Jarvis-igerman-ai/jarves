@@ -768,3 +768,73 @@ async def test_1526_new_failure_in_privacy_mode_keeps_what_the_scrub_keeps(env, 
     d = env.store.get(p["id"])
     assert s["error"] == "X_BROKE" and d["steps"][1]["error"] == "" and "hunter2" not in _all_text(env)
     assert env.store.scrub_private() == 0                                   # nothing left for a later scrub
+
+
+def _disk_bytes(env) -> bytes:
+    from pathlib import Path
+    base = Path(env.db.path)
+    return b"".join(p.read_bytes() for p in (base, Path(str(base) + "-wal")) if p.exists())
+
+
+async def test_1526_old_text_is_gone_from_the_file_and_wal_bytes(env, monkeypatch):
+    await _old_text_plan(env, monkeypatch)
+    env.db.x("DELETE FROM goal_plan_steps WHERE id=-1")                        # the text sits in WAL frames / pages
+    assert b"read secret-a" in _disk_bytes(env)                               # tool output (the step args are the owner's)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    raw = _disk_bytes(env)
+    assert b"read secret-a" not in raw and b"it broke" not in raw
+
+
+async def test_1526_busy_wal_checkpoint_is_a_failure_and_retried(env, monkeypatch):
+    import sqlite3
+    await _old_text_plan(env, monkeypatch)
+    logged = []
+    monkeypatch.setattr(gp.logs, "warn", lambda *a, **k: logged.append(a[1]))
+    reader = sqlite3.connect(env.db.path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT count(*) FROM goal_plans").fetchall()              # holds a read snapshot of the WAL
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    assert logged == ["PLAN_SCRUB_FAILED"] and env.runner._scrubbed is None   # not marked done: retried next tick
+    reader.rollback()
+    reader.close()
+    await env.runner.tick()
+    assert env.runner._scrubbed is not None and b"read secret-a" not in _disk_bytes(env)
+
+
+async def test_1526_text_written_while_off_between_two_ticks_is_rescanned(env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(1) or 0)
+    await env.runner.tick()
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)                    # off and on again with no tick between
+    gp._at_rest("tool text")                                                 # a step writes text in that window
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    await env.runner.tick()
+    assert calls == [1, 1]
+
+
+async def test_1526_block_reason_is_reduced_in_privacy_mode(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    p = env.store.propose("b", steps(("fake_read", {"text": "z"})))
+    env.store.approve(p["id"])
+    env.store._set(p["id"], "running")
+    env.runner._block(p["id"], env.store.get(p["id"])["steps"][0], "tool says hunter2")
+    d = env.store.get(p["id"])
+    assert d["steps"][0]["error"] == "" and d["note"] == "step 1" and "hunter2" not in _all_text(env)
+
+
+async def test_1526_text_in_free_pages_from_an_older_delete_is_gone(env, monkeypatch):
+    _a, b = await _old_text_plan(env, monkeypatch)
+    env.db.x("PRAGMA secure_delete=OFF")
+    for i in range(200):                                                      # enough old rows to fill whole pages
+        env.db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence) VALUES (?,?,?,?,?)",
+                 (b, i + 1, "fake_bad", "failed", "it broke " * 26))
+    env.store.delete(b)                                                       # deleted before privacy: freed, not wiped
+    env.db._db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+    assert b"it broke" in _disk_bytes(env)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    assert b"it broke" not in _disk_bytes(env)

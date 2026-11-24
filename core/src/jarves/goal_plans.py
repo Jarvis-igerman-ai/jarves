@@ -69,9 +69,15 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+_PLAIN = [0]       # #1526: counts tool text written with privacy off; a change means the next privacy-on tick rescans
+
+
 def _at_rest(text: str) -> str:
     """#206 F13: tool output (evidence, error text) is stored on disk; in privacy mode keep the status and code only."""
-    return "" if logs.privacy() else text
+    if logs.privacy():
+        return ""
+    _PLAIN[0] += 1
+    return text
 
 
 # #1526: the fixed reasons this module writes into a step's error / a plan's note. The scrub keeps only these, a
@@ -347,7 +353,8 @@ class PlanStore:
 
     def scrub_private(self) -> int:
         """#1526: privacy mode keeps no tool text, also in rows written before it was on. ONE transaction (never
-        adopts an open one: BEGIN raises), freed bytes overwritten (secure_delete), WAL truncated. Returns rows changed."""
+        adopts an open one: BEGIN raises), then VACUUM and a WAL truncate; a busy checkpoint raises, so the caller
+        retries. Returns rows changed."""
         with self.db._lock:
             c = self.db._db
             c.execute("PRAGMA secure_delete=ON")
@@ -367,7 +374,10 @@ class PlanStore:
             except BaseException:
                 c.rollback()
                 raise
-            c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            c.execute("VACUUM")                       # free pages left by older deletes still held text (R4)
+            busy = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            if busy:                                  # a reader holds the WAL: its frames keep the old text, retry
+                raise sqlite3.OperationalError("wal checkpoint busy")
         return n
 
 
@@ -445,15 +455,18 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
-        self._scrubbed = self._scrub_warned = False
+        self._scrubbed: int | None = None             # the _PLAIN count the last scrub covered (None = not since privacy on)
+        self._scrub_warned = False
 
     def _scrub(self) -> None:
-        """#1526: once per privacy off->on edge (the first tick covers a Core start with privacy on). A failure is
-        retried on the next tick and logged once per outage; it never stops plan execution."""
+        """#1526: with privacy on, scrub when no scrub covered the current _PLAIN count: the first tick (a Core start
+        with privacy on), an off->on edge, and tool text written while privacy was off between two ticks. A failure
+        (also a busy WAL checkpoint) is retried on the next tick and logged once per outage; it never stops plans."""
         if not logs.privacy():
-            self._scrubbed = False
+            self._scrubbed = None
             return
-        if self._scrubbed:
+        seen = _PLAIN[0]
+        if self._scrubbed == seen:                    # nothing written with privacy off since (also off/on between ticks)
             return
         try:
             n = self.store.scrub_private()
@@ -462,7 +475,7 @@ class PlanRunner:
                 logs.warn("goals", "PLAN_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
                 self._scrub_warned = True
             return
-        self._scrubbed, self._scrub_warned = True, False
+        self._scrubbed, self._scrub_warned = seen, False
         if n:
             logs.info("goals", "PLAN_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
 
@@ -495,6 +508,8 @@ class PlanRunner:
         self._stop = True
 
     def _stop_plan(self, pid: int, state: str, note: str, **extra) -> None:
+        if logs.privacy():
+            note = _private_note(note)                # #1526: "step N: <reason>" as the scrub keeps it
         if not self.store._set_if(pid, ("running",), state, note=_short(note, 200), **extra):
             return                                   # the owner paused/cancelled meanwhile: that wins (#813)
         logs.info("goals", "PLAN_STOPPED", "plan stopped", id=pid, state=state)
@@ -619,11 +634,15 @@ class PlanRunner:
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
+        why = _private_text(why) if logs.privacy() else why      # #1526: same reduction as _fail
         self.store.db.x("UPDATE goal_plan_steps SET status='blocked', error=? WHERE id=?", (_short(why, 200), step["id"]))
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
-        why = _private_text(why) if logs.privacy() else why      # #1526: a new write equals what the scrub keeps
+        if logs.privacy():
+            why = _private_text(why)                  # #1526: a new write equals what the scrub keeps
+        else:
+            _PLAIN[0] += 1
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
