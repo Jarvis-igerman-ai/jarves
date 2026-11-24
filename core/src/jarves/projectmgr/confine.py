@@ -21,7 +21,6 @@ it. Stdlib only: run as `python -I confine.py SPEC -- argv...`; a setup failure 
 from __future__ import annotations
 
 import ctypes
-import fcntl
 import json
 import os
 import socket
@@ -70,6 +69,7 @@ def _setattr(libc, fd: int, path: bytes, flags: int) -> None:
 
 
 def _loopback_up() -> None:
+    import fcntl                                  # POSIX only: this module is imported on Windows too
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         req = struct.pack("16sH", b"lo", 0)
         flags = struct.unpack("16sH", fcntl.ioctl(s, 0x8913, req)[:18])[1]          # SIOCGIFFLAGS

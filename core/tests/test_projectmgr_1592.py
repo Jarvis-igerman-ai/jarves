@@ -257,3 +257,11 @@ def test_the_spec_keeps_only_the_worktree_writable_unless_it_is_a_release(projec
     assert s["ro"] == [str(common), str(wt.resolve() / ".git")]
     r = confine.spec(common, own, wt, git_writes=True, net=True)
     assert str(own) in r["rw"] and str(common / "refs") in r["rw"] and str(own / "gitdir") in r["ro"] and r["net"]
+
+
+def test_the_module_imports_where_there_is_no_fcntl():
+    """CI review: gitops imports confine on Windows too; a top-level POSIX-only import crashed the Core there."""
+    code = ("import sys; sys.modules['fcntl'] = None; "
+            "import jarves.projectmgr.gitops, jarves.projectmgr.confine; print('ok')")
+    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False)
+    assert p.stdout.strip() == "ok", p.stderr[-500:]
