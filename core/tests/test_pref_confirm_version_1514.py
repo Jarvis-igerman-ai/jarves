@@ -47,13 +47,16 @@ def test_dashboard_confirm_of_an_item_removed_meanwhile_is_404(home):
     pid = _proposed(home)
     ctx = dashboard.Ctx(home, Config())
     p = prefs_mod._ctx(ctx)
-    real = p.confirm
+    real, calls = p.confirm, []
 
     def removed_first(i, **kw):                      # removed after the route's existence check
+        calls.append(i)
         p.remove(i, by="test")
         return real(i, **kw)
     p.confirm = removed_first
+    assert prefs_mod._ctx(ctx) is p                  # the route uses this same cached instance
     assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": A})[0] == 404
+    assert calls == [pid]                            # the race path really ran (on main: KeyError escapes)
 
 
 # ---------------------------------------------------------------------- voice
@@ -85,6 +88,28 @@ async def test_voice_confirm_for_old_wording_after_an_edit_leaves_the_new_wordin
     assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")      # asked again, now with B
     assert r.ok and seen == [A, B] and p.for_prompt() == [B]
+
+
+async def test_voice_confirm_from_the_user_origin_also_asks_and_binds_the_wording(home):
+    """Review R1: origin "user" (the deterministic parser) goes through the same ask, so it binds too."""
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(A, "I said so", "voice")["item"]["id"]
+    seen: list = []
+    reg = _registry(p, lambda meta: seen.append(meta["details"]["preference"]) or True)
+    r = await reg.call("pref_confirm", {"id": pid}, origin="user")
+    assert r.ok and seen == [A] and p.for_prompt() == [A]
+
+
+async def test_voice_confirm_from_any_other_origin_or_without_an_answer_does_not_confirm(home):
+    """Review R1: only "model" and "user" may call it; a declined ask (even after binding) saves nothing."""
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(A, "I said so", "voice")["item"]["id"]
+    reg = _registry(p, lambda meta: True)
+    for origin in ("scheduler", "system", "trusted"):
+        assert (await reg.call("pref_confirm", {"id": pid}, origin=origin)).code == "TOOL_FORBIDDEN"
+    no = _registry(p, lambda meta: False)
+    assert (await no.call("pref_confirm", {"id": pid}, origin="model")).code == "TOOL_DECLINED"
+    assert p.get(pid)["state"] == "proposed"
 
 
 async def test_voice_confirm_handler_that_was_never_shown_the_wording_does_not_confirm(home):
