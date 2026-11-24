@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 import unicodedata
 
@@ -70,6 +72,45 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
 def _at_rest(text: str) -> str:
     """#206 F13: tool output (evidence, error text) is stored on disk; in privacy mode keep the status and code only."""
     return "" if logs.privacy() else text
+
+
+# #1526: the fixed reasons this module writes into a step's error / a plan's note. The scrub keeps only these, a
+# leading result code and the cap notes; any other text is erased (fail closed: a reworded reason is lost, never leaked).
+_OWN = frozenset({
+    "tool not available (switched off or removed)", "the owner did not approve this step",
+    "text written by others was read earlier in this plan: resume to continue",
+    "the arguments are too long to show in full for your approval; shorten the step",
+    "no approval was given for this step (no answer in time or nowhere to ask)",
+    "the step timed out", "the step timed out: it may already have happened", "the step failed unexpectedly",
+    "interrupted by a restart", "paused by the owner", "cancelled by the owner",
+    "interrupted by a restart: resume when ready", "the daily AI budget is used up"})
+_CAP = re.compile(r"time cap of \d+ min reached|cost cap of \d+ AI requests reached")
+_CODE = re.compile(r"([A-Z][A-Z0-9_]{2,39}|failed)(: .*)?", re.S)
+_STEP = re.compile(r"(step \d+): (.*)", re.S)
+_DONE = re.compile(r"\d+/\d+ steps done\.")
+
+
+def _private_text(text: object) -> str:
+    """An error reason as privacy mode keeps it: an own fixed reason, else the result code only, else nothing."""
+    t = str(text or "")
+    if t in _OWN or _CAP.fullmatch(t):
+        return t
+    m = _CODE.fullmatch(t)
+    return m.group(1) if m else ""
+
+
+def _private_note(text: object) -> str:
+    t = str(text or "")
+    m = _STEP.fullmatch(t)
+    if not m:
+        return _private_text(t)
+    why = _private_text(m.group(2))
+    return f"{m.group(1)}: {why}" if why else m.group(1)
+
+
+def _private_result(text: object) -> str:
+    m = _DONE.match(str(text or ""))
+    return m.group() if m else ""
 
 
 class PlanStore:
@@ -304,6 +345,31 @@ class PlanStore:
             logs.warn("goals", "PLAN_RECOVERED", "running plans paused after a restart", count=n)
         return n
 
+    def scrub_private(self) -> int:
+        """#1526: privacy mode keeps no tool text, also in rows written before it was on. ONE transaction (never
+        adopts an open one: BEGIN raises), freed bytes overwritten (secure_delete), WAL truncated. Returns rows changed."""
+        with self.db._lock:
+            c = self.db._db
+            c.execute("PRAGMA secure_delete=ON")
+            c.execute("BEGIN IMMEDIATE")
+            try:
+                n = 0
+                for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps").fetchall():
+                    if r["evidence"] or r["error"] != _private_text(r["error"]):
+                        c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (_private_text(r["error"]), r["id"]))
+                        n += 1
+                for r in c.execute("SELECT id, result, note FROM goal_plans").fetchall():
+                    new = (_private_result(r["result"]), _private_note(r["note"]))
+                    if new != (r["result"] or "", r["note"] or ""):
+                        c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (*new, r["id"]))
+                        n += 1
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        return n
+
 
 MAX_ATTEMPTS = 3
 
@@ -379,12 +445,33 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._scrubbed = self._scrub_warned = False
+
+    def _scrub(self) -> None:
+        """#1526: once per privacy off->on edge (the first tick covers a Core start with privacy on). A failure is
+        retried on the next tick and logged once per outage; it never stops plan execution."""
+        if not logs.privacy():
+            self._scrubbed = False
+            return
+        if self._scrubbed:
+            return
+        try:
+            n = self.store.scrub_private()
+        except sqlite3.Error as e:
+            if not self._scrub_warned:
+                logs.warn("goals", "PLAN_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
+                self._scrub_warned = True
+            return
+        self._scrubbed, self._scrub_warned = True, False
+        if n:
+            logs.info("goals", "PLAN_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
 
     async def tick(self) -> int:
         """Advance every ready / running plan; returns how many were touched."""
+        self._scrub()
         if not self._on():
             return 0
         n = 0
@@ -536,6 +623,7 @@ class PlanRunner:
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
+        why = _private_text(why) if logs.privacy() else why      # #1526: a new write equals what the scrub keeps
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
