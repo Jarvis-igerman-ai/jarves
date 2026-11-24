@@ -780,10 +780,17 @@ async def test_1526_r4_failed_update_rolls_back_the_whole_scrub(env, monkeypatch
     assert env.store.scrub_private() == 4
 
 
-async def test_1526_scrub_restores_secure_delete(env):
-    env.db.x("PRAGMA secure_delete=OFF")
+async def test_1526_scrub_turns_secure_delete_on_for_its_own_connection(env, monkeypatch):
+    import sqlite3
+    sql, real = [], sqlite3.connect
+
+    def connect(*a, **k):
+        c = real(*a, **k)
+        c.set_trace_callback(sql.append)
+        return c
+    monkeypatch.setattr(gp.sqlite3, "connect", connect)
     env.store.scrub_private()
-    assert env.db._db.execute("PRAGMA secure_delete").fetchone()[0] == 0
+    assert sql.index("PRAGMA secure_delete=ON") < sql.index("BEGIN IMMEDIATE")
 
 
 async def test_1526_review_r1_scrub_never_takes_the_shared_lock_and_fails_fast(env, monkeypatch):
@@ -831,3 +838,46 @@ async def test_1526_review_r3_scrub_result_matches_finish_for_a_long_plan(env, m
     assert env.store.scrub_private() == 0 and env.store.get(p["id"])["result"] == before
     cut = gp._result_text([{"idx": i, "tool": "t" * 90, "status": "done", "evidence": ""} for i in range(12)])
     assert len(cut) - len("12/12 steps done. ") == gp.RESULT_CHARS and cut.endswith("…")   # same cap as _finish
+
+
+def test_1526_review_r2_every_fixed_reason_a_writer_stores_survives_the_scrub():
+    """Drift guard: each literal reason/note the plan code stores (call args, note=..., recover) is in _OWN."""
+    import ast
+    import inspect
+    found = set()
+    for n in ast.walk(ast.parse(inspect.getsource(gp))):
+        if not isinstance(n, ast.Call):
+            continue
+        name = getattr(n.func, "attr", getattr(n.func, "id", ""))
+        args = n.args[2:3] if name in ("_block", "_fail", "_stop_plan") else []
+        args += [k.value for k in n.keywords if k.arg == "note"]
+        for a in args:
+            if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                found.add(a.value)
+            elif isinstance(a, ast.BinOp) and isinstance(a.left, ast.Constant):          # "x" + (": y" if c else "")
+                found |= {a.left.value + e.value for e in (a.right.body, a.right.orelse)}
+    found.discard("")
+    assert len(found) >= 10 and found | {"interrupted by a restart"} <= gp._OWN
+    for r in found:
+        assert gp._private_error(r) == r and gp._private_note(f"step 1: {r}") == f"step 1: {r}"
+
+
+async def test_1526_review_r3_fail_never_stores_a_bare_tool_message(env, monkeypatch):
+    async def leak(_a: NoArgs):
+        return ToolResult(False, "AKIAIOSFODNN7EXAMPLE", code="")
+
+    class Leak(Skill):
+        name = "leak"
+        description = "fails with an upper-case message and no code"
+
+        def tools(self):
+            return [Tool("fake_leak", "l", leak, NoArgs, permission="read")]
+    env.reg.register(Leak())
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
+    p = env.store.propose("p", steps(("fake_leak", {})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    err = env.store.get(p["id"])["steps"][0]["error"]
+    assert err == "failed: AKIAIOSFODNN7EXAMPLE" and not gp._CODE.fullmatch(err)    # never a bare, code-shaped value
+    env.store.scrub_private()
+    assert "AKIA" not in _all_text(env) and env.store.get(p["id"])["steps"][0]["error"] == "failed"

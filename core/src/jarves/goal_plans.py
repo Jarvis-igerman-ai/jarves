@@ -468,7 +468,9 @@ class PlanRunner:
         """#1526: with privacy on, scrub once when no scrub covers the current _PLAIN count (Core start with privacy on,
         an off->on edge, tool text stored while off between two ticks). It runs in a worker thread, never awaited by
         the tick; the next tick collects it. A failure is retried after a backoff (2 s doubling to 300 s), logged once
-        per outage (any error: the scrub only runs SQL, so the retry and log stay bounded) and never stops plans."""
+        per outage (any error: the scrub only runs SQL, so the retry and log stay bounded); a failed scrub never
+        stops plans. While its single write transaction is open, a plan write on the shared connection waits on that
+        connection's busy timeout (5 s, userdata.UserDB) instead of failing; the two plan tables are small."""
         t = self._scrub_task
         if t is not None:
             if not t.done():
