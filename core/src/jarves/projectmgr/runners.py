@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,15 +99,31 @@ class Runner:
     def run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
             check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None,
             team: bool = False) -> Result:
+        shim = ""
+        try:
+            if check_argv and not read_only and gitops.confine_available():
+                shim = check_shim(gitops.confined(check_argv, cwd))
+                check_argv, prompt = [SHIM], prompt + SHIM_NOTE
+        except (OSError, subprocess.SubprocessError) as e:
+            return Result(error=f"could not confine the check for {self.name}: {e}")
+        try:
+            return self._run(prompt, cwd, model, resume, read_only, check_argv, timeout, on_start, cancel, team, shim)
+        finally:
+            if shim:
+                os.chmod(shim, 0o700)
+                shutil.rmtree(shim, ignore_errors=True)
+
+    def _run(self, prompt, cwd, model, resume, read_only, check_argv, timeout, on_start, cancel, team, shim) -> Result:
         try:
             spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
                               team=team)
             check_flags(spec.argv)
         except ValueError as e:
             return Result(error=str(e))
+        if shim:
+            spec.env["PATH"] = shim + os.pathsep + spec.env.get("PATH", "")
         try:
-            argv = gitops.confined(spec.argv, cwd, git_writes=True) if check_argv and not read_only else spec.argv
-            p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
+            p = subprocess.Popen(spec.argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
                                  creationflags=_NOWIN, encoding="utf-8", errors="replace",
                                  start_new_session=(os.name != "nt"))
@@ -136,6 +154,23 @@ class Runner:
         if not r.ok and not r.error:
             r.error = (box.get("err") or "").strip()[-300:] or f"{self.name} exited with {p.returncode}"
         return r
+
+
+SHIM = "jarves-check"
+SHIM_NOTE = f"\n\nRun the project's check command as `{SHIM}` (your arguments are passed on to it)."
+
+
+def check_shim(argv: list[str]) -> str:
+    """A private folder with one `jarves-check` script that runs the (confined) check command, for the agent's PATH
+    (#1592): the agent's allow rule names only this script, so the check's code never runs in the agent's process
+    tree, which must write its own state (~/.claude). The folder is read-only; the caller removes it after the run."""
+    d = tempfile.mkdtemp(prefix="jarves-check-")
+    f = os.path.join(d, SHIM)
+    with open(f, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in argv) + ' "$@"\n')
+    os.chmod(f, 0o500)
+    os.chmod(d, 0o500)
+    return d
 
 
 def kill_tree(p: subprocess.Popen) -> None:

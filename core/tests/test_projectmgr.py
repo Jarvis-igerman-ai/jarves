@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from jarves.config import Config
-from jarves.projectmgr import cards, gitops, plan as planmod, runners
+from jarves.projectmgr import cards, confine, gitops, plan as planmod, runners
 from jarves.projectmgr.service import Manager
 
 FAKE = textwrap.dedent('''
@@ -96,7 +96,8 @@ def sh(cwd, *a):
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    monkeypatch.setattr(confine, "HIDE", ())     # checks here read flag files in pytest's /tmp folder (#1592)
     repo = tmp_path / "repo"
     repo.mkdir()
     sh(repo, "git", "init", "-q", "-b", "main")
@@ -1183,11 +1184,11 @@ def test_set_flow_project_default_and_task_and_release_stage(env):
     assert t["flow"] == "plan work test review merge"
     assert m.call("flow", project="demo", task=1, flow="work test merge release:jarves")["ok"]
     assert m.call("flow", project="demo", task=1, flow=[{"kind": "cmd", "cmd": ["x"]}], by="voice")["code"] == "BAD_FLOW"
-    flag = home.parent / "released"
-    m.db.update_project(1, release_cmd=[sys.executable, "-c", f"open(r'{flag}','w').write('v1')"])
+    # a release can tag; on Linux it cannot write outside its worktree (#1592), so the tag is what it leaves
+    m.db.update_project(1, release_cmd=["git", "-c", "user.name=t", "-c", "user.email=t@t", "tag", "v1"])
     m.call("resume", project="demo")
     finish(m)
-    assert m.db.by_seq(1, 1)["status"] == "done" and flag.read_text() == "v1"
+    assert m.db.by_seq(1, 1)["status"] == "done" and sh(repo, "git", "tag", "--list").strip() == "v1"
     assert not (gitops.project_root(home, 1) / "release").exists() or not any((gitops.project_root(home, 1) / "release").iterdir())
 
 

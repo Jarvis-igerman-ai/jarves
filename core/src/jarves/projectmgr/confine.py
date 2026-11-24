@@ -1,84 +1,115 @@
-"""Linux confinement for code a task brought in (#1592): a project's check command and an agent that may run it.
+"""Linux confinement for code a task brought in (#1592): a project's check command and the release command.
 
 That code runs as the owner, so a Claude permission rule cannot stop it from writing the repository's shared git files
-(`.git/config`, hooks, `info/attributes`, the `.git` pointer and `commondir`/`gitdir` files of every worktree); git
-(JARVES's and the owner's) would then run a planted filter or hook. Here the command runs in its own user + mount
-namespace where those paths are read-only bind mounts. Every process it starts stays in that namespace, also after
-the run ends, and the mounts are locked for nested namespaces (no umount, no non-recursive bind of the parent).
-`/run/user/<uid>` is hidden (an empty tmpfs) so the systemd user manager / D-Bus cannot start a process outside it.
+or anything that later runs code outside the run (`~/.gitconfig`, `~/.bashrc`, systemd user units); git (JARVES's and
+the owner's) would then run a planted filter or hook. Here the command runs in its own user + mount namespace where
+the WHOLE file system is read-only (so no file and no parent folder can be changed or renamed), except:
+- the run's worktree (its `.git` pointer file stays read-only),
+- empty private tmpfs folders over `/tmp`, `/var/tmp`, `/dev/shm`, `/run/user/<uid>` and `~/.cache` (this also hides
+  the owner's tmux/screen/X11/D-Bus sockets there),
+- with `git_writes` (the release command, which may tag): `objects/`, `refs/`, `logs/` and its own
+  `worktrees/<name>/` of the shared git dir (its `commondir`/`gitdir` stay read-only). Such a run can move any branch
+  or tag and add `config.worktree` there (git reads it only if the owner set `extensions.worktreeConfig`).
+A check also gets its own network namespace (only a loopback): no network and no abstract unix socket of the owner.
+Every process the command starts stays in the namespace for good, also after the run ends; the mounts are locked for
+nested namespaces (no umount, no clearing read-only).
 
-Usable with git writes (`git_writes=True`, an agent's `git add`/`commit`): `objects/`, `refs/`, `logs/` and this
-worktree's own `worktrees/<name>/` stay writable, its `commondir`/`gitdir` stay read-only. So such a run can still move
-any branch or tag, and can add a `config.worktree` there (git reads it only if the owner set `extensions.worktreeConfig`).
-
-Honest limits: Linux only (Windows/macOS run as before, #1665); where user namespaces are off the command runs as
-before and JARVES logs that once. Other files the owner can write (`~/.gitconfig`, other repositories) are not
-covered. Stdlib only: run as `python -I confine.py SPEC -- argv...`; a setup failure exits 125 and never runs argv.
+Honest limits: Linux with user namespaces and kernel 5.12+ only (Windows/macOS run as before, #1665; elsewhere JARVES
+logs once that it cannot confine). The release command keeps the network, so abstract unix sockets stay reachable for
+it. Stdlib only: run as `python -I confine.py SPEC -- argv...`; a setup failure exits 125 and never runs argv.
 """
 from __future__ import annotations
 
 import ctypes
+import fcntl
 import json
 import os
+import socket
+import struct
 import sys
 from pathlib import Path
 
 FAIL = 125
-MS_RDONLY, MS_REMOUNT, MS_BIND, MS_REC, MS_PRIVATE = 1, 32, 4096, 16384, 1 << 18
-_KEEP = 2 | 4 | 8 | 1024 | 2048 | 4096        # nosuid, nodev, noexec, noatime, nodiratime, relatime (locked flags)
+AT_FDCWD, AT_EMPTY_PATH, AT_RECURSIVE = -100, 0x1000, 0x8000
+OPEN_TREE_CLONE, MOVE_MOUNT_F_EMPTY_PATH, MOUNT_ATTR_RDONLY = 1, 4, 1
+SYS_OPEN_TREE, SYS_MOVE_MOUNT, SYS_MOUNT_SETATTR = 428, 429, 442     # the same number on x86_64 and arm64
+MS_REC, MS_PRIVATE = 16384, 1 << 18
+HIDE = ("/tmp", "/var/tmp", "/dev/shm")          # each becomes an empty private tmpfs (plus /run/user/<uid>, ~/.cache)
 
 
-def spec(common: Path, own: Path, wt: Path, git_writes: bool) -> dict:
-    """Read-only and writable paths for a run in worktree `wt` (git dir `own`) of the repository whose shared git dir is
-    `common`, taken when the run starts. Every worktree's `.git` pointer file is listed, also ones outside `wt`."""
+def spec(common: Path, own: Path, wt: Path, git_writes: bool = False, net: bool = False) -> dict:
+    """What a run in worktree `wt` (git dir `own`) of the repository with shared git dir `common` may write."""
     common, own, wt = common.resolve(), own.resolve(), wt.resolve()
-    ro: list[str] = []
-    for g in sorted((common / "worktrees").glob("*/gitdir")):
-        ptr = Path(g.read_text(encoding="utf-8", errors="replace").strip())
-        if ptr.name == ".git" and ptr.is_file():
-            ro.append(str(ptr.resolve()))
-    if (wt / ".git").is_file() and str(wt / ".git") not in ro:
+    rw, ro = [str(wt)], [str(common)]
+    if (wt / ".git").is_file():
         ro.append(str(wt / ".git"))
-    rw: list[str] = []
     if git_writes:
-        rw = [str(common / d) for d in ("objects", "refs", "logs") if (common / d).is_dir()]
+        rw += [str(common / d) for d in ("objects", "refs", "logs") if (common / d).is_dir()]
         if own.parent == common / "worktrees":
             rw.append(str(own))
             ro += [str(own / f) for f in ("commondir", "gitdir") if (own / f).is_file()]
-    run = Path(f"/run/user/{os.getuid()}")
-    return {"tree": str(common), "ro": ro, "rw": rw, "mask": [str(run)] if run.is_dir() else []}
+    hide = (*HIDE, f"/run/user/{os.getuid()}", os.path.join(os.path.expanduser("~"), ".cache"))
+    mask = [p for p in hide if os.path.isdir(p)]
+    return {"rw": rw, "ro": ro, "mask": mask, "net": bool(net)}
 
 
 def wrap(argv: list[str], s: dict) -> list[str]:
     return [sys.executable, "-I", str(Path(__file__).resolve()), json.dumps(s), "--", *argv]
 
 
-def _mount(libc, src, dst, fs, flags) -> None:
-    if libc.mount(src, dst.encode(), fs, flags, None) != 0:
-        raise OSError(ctypes.get_errno(), f"mount {dst}: {os.strerror(ctypes.get_errno())}")
+def _ok(r: int, what: str) -> int:
+    if r < 0:
+        e = ctypes.get_errno()
+        raise OSError(e, f"{what}: {os.strerror(e)}")
+    return r
 
 
-def _bind(libc, p: str, ro: bool, rec: bool = False) -> None:
-    _mount(libc, p.encode(), p, None, MS_BIND | (MS_REC if rec else 0))
-    flags = os.statvfs(p).f_flag & _KEEP
-    _mount(libc, None, p, None, MS_REMOUNT | MS_BIND | flags | (MS_RDONLY if ro else 0))
+def _setattr(libc, fd: int, path: bytes, flags: int) -> None:
+    attr = struct.pack("QQQQ", MOUNT_ATTR_RDONLY, 0, 0, 0)
+    _ok(libc.syscall(SYS_MOUNT_SETATTR, fd, path, flags, attr, len(attr)), f"read-only {path.decode() or fd}")
+
+
+def _loopback_up() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        req = struct.pack("16sH", b"lo", 0)
+        flags = struct.unpack("16sH", fcntl.ioctl(s, 0x8913, req)[:18])[1]          # SIOCGIFFLAGS
+        fcntl.ioctl(s, 0x8914, struct.pack("16sH", b"lo", flags | 1))                # SIOCSIFFLAGS, IFF_UP
 
 
 def enter(s: dict) -> None:
-    uid, gid = os.getuid(), os.getgid()
-    os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNS)
+    uid, gid, cwd = os.getuid(), os.getgid(), os.getcwd()
+    os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNS | (0 if s.get("net") else os.CLONE_NEWNET))
     for name, text in (("setgroups", "deny"), ("uid_map", f"{uid} {uid} 1"), ("gid_map", f"{gid} {gid} 1")):
         with open(f"/proc/self/{name}", "w", encoding="ascii") as f:
             f.write(text)
+    if not s.get("net"):
+        _loopback_up()
     libc = ctypes.CDLL(None, use_errno=True)
-    _mount(libc, None, "/", None, MS_REC | MS_PRIVATE)
-    for p in s["rw"]:                             # own mounts first, so the recursive bind of the tree keeps them writable
-        _bind(libc, p, ro=False)
-    _bind(libc, s["tree"], ro=True, rec=True)     # the remount makes only the top of the tree read-only
-    for p in s["ro"]:
-        _bind(libc, p, ro=True)
+    libc.syscall.restype = ctypes.c_long
+    _ok(libc.mount(None, b"/", None, MS_REC | MS_PRIVATE, None), "private /")
+    keep = [(p, False) for p in s["rw"]] + [(p, True) for p in s["ro"]]
+    trees = []                                    # writable copies taken BEFORE everything turns read-only
+    for p, ro in keep:
+        fd = _ok(libc.syscall(SYS_OPEN_TREE, AT_FDCWD, p.encode(), OPEN_TREE_CLONE | AT_RECURSIVE), f"copy {p}")
+        if ro:
+            _setattr(libc, fd, b"", AT_EMPTY_PATH | AT_RECURSIVE)
+        trees.append((p, fd))
+    _setattr(libc, AT_FDCWD, b"/", AT_RECURSIVE)
+    if os.path.ismount("/proc"):                  # /proc stays writable (a process's own maps, oom score); its
+        attr = struct.pack("QQQQ", 0, MOUNT_ATTR_RDONLY, 0, 0)        # system files belong to the real root
+        _ok(libc.syscall(SYS_MOUNT_SETATTR, AT_FDCWD, b"/proc", 0, attr, len(attr)), "writable /proc")
     for p in s["mask"]:
-        _mount(libc, b"tmpfs", p, b"tmpfs", 2 | 4 | 8)
+        _ok(libc.mount(b"tmpfs", p.encode(), b"tmpfs", 2 | 4, b"mode=700"), f"hide {p}")   # nosuid, nodev
+    for p, fd in sorted(trees, key=lambda t: len(Path(t[0]).parts)):   # a parent before what is mounted inside it
+        if not os.path.lexists(p):                # under a hidden (tmpfs) folder: make the mount point there
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            if os.path.isdir(f"/proc/self/fd/{fd}"):
+                os.mkdir(p)
+            else:
+                open(p, "w").close()              # noqa: SIM115
+        _ok(libc.syscall(SYS_MOVE_MOUNT, fd, b"", AT_FDCWD, p.encode(), MOVE_MOUNT_F_EMPTY_PATH), f"mount {p}")
+        os.close(fd)
+    os.chdir(cwd)                                 # the old working folder is below the read-only copy now
 
 
 def main(args: list[str]) -> int:
