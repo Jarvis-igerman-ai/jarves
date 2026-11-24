@@ -1221,6 +1221,8 @@ def test_claim_stage_atomic_guard_against_a_racing_stop(env):
 FAKE_GH = textwrap.dedent('''
     import json, os, sys
     a = sys.argv[1:]
+    with open(os.path.join(os.path.dirname(__file__), "gh_calls.jsonl"), "a") as f:
+        f.write(json.dumps({"argv": a, "cwd": os.getcwd(), "git_dir": os.environ.get("GIT_DIR", "")}) + "\\n")
     if a[:2] == ["auth", "status"]:
         sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
     if a[:2] == ["issue", "list"]:
@@ -1258,24 +1260,27 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     sh(repo, "git", "init", "-q", "-b", "main")
     sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
     assert forge.repo_slug(str(repo)) == "o/r"
-    st = forge.status(str(repo))
+    st = forge.status(str(repo), "o/r")
     assert st["gh"] and not st["signed_in"]
     (tmp_path / "signed_in").write_text("1")
     try:
-        st = forge.status(str(repo))
+        st = forge.status(str(repo), "o/r")
         assert st["signed_in"] and st["repo"] == "o/r"
-        rows = forge.issues(str(repo))
+        rows = forge.issues("o/r")
         assert rows and rows[0]["number"] == 7 and rows[0]["labels"] == ["bug"]
-        url = forge.create_pr(str(repo), "jarves/p1/t1-a1", "main", "title", "body")
+        url = forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "title", "body")
         assert url.endswith("/pull/9")
-        checks = forge.pr_checks(str(repo), "9")
+        checks = forge.pr_checks("o/r", "9")
         assert checks and checks[0]["bucket"] == "pass"
+        for bad in ("", "o", "o/r/x", "../r", "o/..", "o r/x", "--repo=x/y", "-x/y", "o/-r", "o/.r"):
+            with pytest.raises(forge.ForgeError, match="no GitHub repository is recorded"):
+                forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
+        forge.push_branch(str(repo), "main", "o/r")                  # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "jarves/p1/../escape")
+        forge.push_branch(str(repo), "jarves/p1/../escape", "o/r")
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):
@@ -1284,7 +1289,8 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     open_project(m, repo)
     assert m.call("configure", project="demo", github="write", by="voice")["code"] == "CLI_ONLY"
     r = m.call("configure", project="demo", github="write")
-    assert r["ok"] and r["project"]["github"] == "write"
+    assert r["ok"] and r["project"]["github"] == "write" and r["project"]["github_repo"] == "o/r"
+    assert "will only use o/r" in r["text"]                          # the owner sees the pinned target (#1622)
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
@@ -1295,10 +1301,70 @@ def test_github_status_text_names_the_git_prerequisite(env, monkeypatch):
     from jarves.projectmgr import forge
     m, repo, _ = env
     open_project(m, repo)
-    monkeypatch.setattr(forge, "status", lambda path: {"git": False, "git_error": "JARVES needs git 2.31 or later "
+    monkeypatch.setattr(forge, "status", lambda path, repo="": {"git": False, "git_error": "JARVES needs git 2.31 or later "
                                                        "(found: 2.30)", "gh": True, "signed_in": False, "repo": ""})
     g = m.call("github", project="demo")
     assert g["ok"] and "git 2.31 or later" in g["text"] and g["git"] is False and "remote" not in g["text"]
+
+
+def test_1622_gh_runs_outside_the_project_with_the_recorded_repo(fake_gh, tmp_path):
+    """#1622: an agent-written origin/insteadOf in the shared config does not move gh's target, and gh runs in an
+    empty folder whose git finds no repository."""
+    from jarves.projectmgr import forge
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/evil/fork.git")
+    sh(repo, "git", "config", "url.https://github.com/evil/.insteadOf", "https://github.com/o/")
+    (tmp_path / "signed_in").write_text("1")
+    try:
+        assert forge.status(str(repo), "o/r")["repo"] == "o/r"
+        forge.issues("o/r", label="bug")
+        forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b")
+        forge.pr_checks("o/r", "9")
+    finally:
+        (tmp_path / "signed_in").unlink(missing_ok=True)
+    calls = [json.loads(x) for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 4 and calls[0]["argv"] == ["auth", "status"]
+    for c in calls:
+        assert not os.path.exists(c["cwd"]) and not os.path.realpath(c["cwd"]).startswith(os.path.realpath(repo))
+        assert c["git_dir"] and not os.path.exists(c["git_dir"])
+        assert c["argv"][:2] == ["auth", "status"] or (c["argv"][-1] == "--repo=o/r" and "evil" not in str(c["argv"]))
+
+
+def test_1622_gh_env_git_reads_no_global_or_repository_config(tmp_path):
+    """#1622 R3: real git with gh's environment (GIT_CONFIG_GLOBAL=os.devnull, which is `nul` on Windows) runs, finds
+    no repository and ignores a planted ~/.gitconfig rewrite."""
+    from jarves.projectmgr import forge
+    (tmp_path / ".gitconfig").write_text('[url "https://github.com/evil/"]\n\tinsteadOf = https://github.com/o/\n')
+    env = {**forge.gh_env(str(tmp_path)), "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
+    plain = subprocess.run(["git", "config", "--global", "--get-regexp", "^url"], cwd=tmp_path, capture_output=True,
+                           text=True, env={**env, "GIT_CONFIG_GLOBAL": str(tmp_path / ".gitconfig")})
+    assert "evil" in plain.stdout                                     # negative control: the planted rewrite exists
+    got = subprocess.run(["git", "config", "--get-regexp", "^url"], cwd=tmp_path, capture_output=True, text=True,
+                         env=env)
+    assert got.returncode == 1 and got.stdout == "" and "fatal" not in got.stderr, got.stderr
+    rv = subprocess.run(["git", "remote", "-v"], cwd=tmp_path, capture_output=True, text=True, env=env)
+    assert rv.returncode != 0 and "not a git repository" in rv.stderr, rv.stderr
+
+
+def test_1622_github_status_and_push_keep_the_recorded_repo(env, fake_gh):
+    """#1622 (R1): after an agent rewrites origin, status shows the recorded repo and push_branch refuses."""
+    from jarves.projectmgr import forge
+    m, repo, _ = env
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
+    open_project(m, repo)
+    assert m.call("configure", project="demo", github="read")["ok"]
+    sh(repo, "git", "remote", "set-url", "origin", "https://github.com/evil/fork.git")
+    g = m.call("github", project="demo")
+    assert g["ok"] and g["repo"] == "o/r" and g["origin"] == "evil/fork" and "elsewhere" in g["text"]
+    sh(repo, "git", "branch", "jarves/p1/t1-a1")
+    rec = m.call("github", project="demo")["repo"]
+    with pytest.raises(forge.ForgeError, match="recorded repository o/r"):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", rec)
+    assert m.call("configure", project="demo", github="off")["ok"]
+    g = m.call("github", project="demo")
+    assert g["repo"] == "" and "no repository recorded)" in g["text"]
 
 
 def _rule_matches(rule: str, cmd: str) -> bool:

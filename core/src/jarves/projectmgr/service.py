@@ -302,7 +302,8 @@ class Manager(StageEngine):
             counts[t["status"]] = counts.get(t["status"], 0) + 1
         return {"id": p["id"], "name": p["name"], "path": p["path"], "goal": p["goal"], "status": p["status"],
                 "check": p["check_cmd"], "runners": p["runners"], "brief": p["brief"], "counts": counts,
-                "github": p.get("github") or "off", "release_cmd": p.get("release_cmd") or [],
+                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "",
+                "release_cmd": p.get("release_cmd") or [],
                 "flow": pl.describe(pl.parse(self._project_flow(p) or pl.DEFAULT_TEMPLATE, trusted=True)),
                 "total": len(ts), "branch": gitops.integration_branch(p["id"])}
 
@@ -370,20 +371,26 @@ class Manager(StageEngine):
         if github is not None:
             if github not in forge.MODES:
                 return _res(False, "BAD_GITHUB", "github is off, read or write")
-            if github != "off" and not forge.repo_slug(p["path"]):
+            slug = forge.repo_slug(p["path"]) if github != "off" else ""
+            if github != "off" and not forge.valid_repo(slug):
                 return _res(False, "NOT_GITHUB", "this project's origin is not a github.com repository")
-            f["github"] = github
+            f["github"], f["github_repo"] = github, slug      # #1622: gh and push only ever target this record
         self.db.update_project(p["id"], **f)
-        return _res(True, "ok", "saved", project=self._pview(self.db.project(p["id"])))
+        text = "saved" + (f"; GitHub {github} will only use {f['github_repo']} (read from origin now: check it)"
+                          if f.get("github_repo") else "")
+        return _res(True, "ok", text, project=self._pview(self.db.project(p["id"])))
 
     def github_status(self, project: str = "", **_) -> dict:
         p, err = self._need_project(project)
         if err:
             return err
-        st = forge.status(p["path"])
         mode = p.get("github") or "off"
-        where = (f" ({st['repo']})" if st["repo"] else " (no github.com remote)") if st.get("git", True) else \
+        st = forge.status(p["path"], p.get("github_repo") or "")
+        where = (f" ({st['repo']})" if st["repo"] else " (no repository recorded" + (
+            ": run configure --github on the PC)" if mode != "off" else ")")) if st.get("git", True) else \
             f"; {st.get('git_error')}"                          # #1722: the remote was not checked without git 2.31
+        if st["repo"] and st.get("origin") != st["repo"]:
+            where += f"; origin now points elsewhere ({st.get('origin') or 'not github.com'}), JARVES keeps {st['repo']}"
         return _res(True, "ok", f"{p['name']}: GitHub {mode}{where}", mode=mode, **st)
 
     def runners_info(self, **_) -> dict:
