@@ -1290,6 +1290,17 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
 
 
+def test_github_status_text_names_the_git_prerequisite(env, monkeypatch):
+    """#1722 R6: `jarvis project github` prints the result text, so the git 2.31 message must be in it."""
+    from jarves.projectmgr import forge
+    m, repo, _ = env
+    open_project(m, repo)
+    monkeypatch.setattr(forge, "status", lambda path: {"git": False, "git_error": "JARVES needs git 2.31 or later "
+                                                       "(found: 2.30)", "gh": True, "signed_in": False, "repo": ""})
+    g = m.call("github", project="demo")
+    assert g["ok"] and "git 2.31 or later" in g["text"] and g["git"] is False
+
+
 def _rule_matches(rule: str, cmd: str) -> bool:
     """Tiny model of Claude Code Bash rules: `X:*` = prefix, `*` = glob, otherwise exact."""
     import fnmatch

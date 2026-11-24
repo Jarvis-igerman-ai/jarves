@@ -3,13 +3,17 @@ owner's own login (JARVES stores no token). Never force-pushes, never merges on 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 from . import gitops
 
+_log = logging.getLogger(__name__)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
@@ -47,8 +51,12 @@ def gh(path: str, *args: str, input_: str | None = None, timeout: float = 120) -
 
 
 def status(path: str) -> dict:
-    """Read-only facts for `jarvis project github`: gh installed, signed in, the repo slug."""
-    out = {"gh": bool(gh_cmd()), "signed_in": False, "repo": repo_slug(path)}
+    """Read-only facts for `jarvis project github`: git usable (2.31+, #1722), gh installed, signed in, the slug."""
+    try:
+        gitops.require_git(path)
+    except (gitops.GitError, OSError, subprocess.SubprocessError) as e:
+        return {"git": False, "git_error": str(e)[:200], "gh": bool(gh_cmd()), "signed_in": False, "repo": ""}
+    out = {"git": True, "gh": bool(gh_cmd()), "signed_in": False, "repo": repo_slug(path)}
     if out["gh"]:
         try:
             gh(path, "auth", "status")
@@ -68,11 +76,35 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
 
+# (#1722) the push URL: github.com over https or ssh only. No `<helper>::` (ext::, fd::), no local path, no option.
+PUSH_URL_FORMS = "https://github.com/OWNER/REPO, ssh://git@github.com[:22]/OWNER/REPO or git@github.com:OWNER/REPO"
+_PUSH_URL = re.compile(r"^(?:https://(?:[^@/\s:]+(?::[^@/\s]*)?@)?(?i:github\.com)/|ssh://git@(?i:github\.com)(?::22)?/"
+                       r"|git@(?i:github\.com):)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(?:\.git)?/?\Z")
+
+
 def push_branch(path: str, branch: str) -> None:
-    """A normal push of one branch to origin (never --force, never a tag, never the default branch)."""
+    """A normal push of one branch to origin (never --force, never a tag, never the default branch).
+    #1722: the project's own config is agent-writable (remote.<x>.receivepack/pushurl, url.*.insteadOf, ext::,
+    core.sshCommand, credential helpers, gpg...). So git push runs in a fresh JARVES-made bare repository that borrows
+    the project's objects (alternates): only the owner's system/global config applies, and nothing the project config
+    adds later reaches the push. The one value read from it, origin's URL, must be a github.com https/ssh URL.
+    Afterwards refs/remotes/origin/<branch> is set locally, best effort (the branch is already pushed)."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
-    gitops.git(path, "push", "--no-verify", "origin", f"{branch}:{branch}", timeout=300, ident=False)
+    url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
+    if not _PUSH_URL.match(url):
+        raise ForgeError(f"JARVES pushes only to a github.com origin: {PUSH_URL_FORMS}")
+    sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
+    objects = gitops.git(path, "rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
+    with tempfile.TemporaryDirectory(prefix="jarves-push-") as tmp:
+        gitops.git(tmp, "init", "-q", "--bare")
+        (Path(tmp) / "objects" / "info" / "alternates").write_text(objects + "\n", encoding="utf-8")
+        gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", url, f"{sha}:refs/heads/{branch}",
+                   timeout=300, ident=False)
+    try:
+        gitops.git(path, "update-ref", f"refs/remotes/origin/{branch}", sha)
+    except (gitops.GitError, OSError, subprocess.SubprocessError) as e:
+        _log.warning("pushed %s, but the local tracking ref origin/%s was not updated: %s", branch, branch, e)
 
 
 def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:

@@ -1,0 +1,111 @@
+"""#1722: a JARVES push never runs a command, or goes to a URL, that the project's shared (agent-writable) git config
+names; and the project's GitHub status names the git 2.31 prerequisite. Each command test has a negative control: a
+plain `git push origin` with the same config runs the marker command on this platform."""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from jarves.projectmgr import forge, gitops
+
+BRANCH = "jarves/p1/t1-a1"
+URL = "https://github.com/o/r.git"
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """The owner's global config: allows ext:: (so only the guard under test stops it) and rewrites github.com to a
+    local bare repository (hermetic, no network)."""
+    h = tmp_path / "owner-home"
+    h.mkdir()
+    bare = tmp_path / "remote" / "r.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    (h / ".gitconfig").write_text(f"[user]\n\tname = O\n\temail = o@example.invalid\n[protocol \"ext\"]\n\tallow = "
+                                  f"always\n[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
+    for k in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(k, str(h))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
+    return bare
+
+
+def _setup(tmp_path: Path, origin: str = URL) -> tuple[Path, str, Path]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    gitops.git(repo, "init", "-q", "-b", "main")
+    gitops.git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    gitops.git(repo, "branch", BRANCH)
+    gitops.git(repo, "config", "remote.origin.url", origin)
+    marker, py = tmp_path / "ran.txt", tmp_path / "evil.py"
+    py.write_text(f"open({str(marker)!r}, 'a').write('ran')\nraise SystemExit(1)\n", encoding="utf-8")
+    return repo, f"{Path(sys.executable).as_posix()} {py.as_posix()}", marker
+
+
+def _on(bare: Path) -> bool:
+    return BRANCH in subprocess.run(["git", "--git-dir", str(bare), "branch", "--list", BRANCH], capture_output=True,
+                                    text=True).stdout
+
+
+@pytest.mark.parametrize("key,value", [
+    ("remote.origin.receivepack", "{cmd}"),                       # transport command
+    ("remote.origin.pushurl", "ext::{cmd}"),                      # ext:: through the remote's push URL
+    ("url.ext::{cmd} #.pushInsteadOf", URL)])                     # push URL rewrite to ext::
+def test_shared_config_commands_never_run_on_a_push(tmp_path, home, key, value):
+    repo, cmd, marker = _setup(tmp_path)
+    gitops.git(repo, "config", key.format(cmd=cmd), value.format(cmd=cmd))
+    neg = subprocess.run(["git", "push", "origin", BRANCH], cwd=repo, capture_output=True, text=True)
+    assert neg.returncode != 0 and marker.exists(), neg.stderr               # negative control
+    marker.unlink()
+    forge.push_branch(str(repo), BRANCH)
+    assert not marker.exists() and _on(home)
+    sha = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
+    assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
+
+
+def test_shared_ssh_command_never_runs(tmp_path, home):
+    """The owner's own core.sshCommand applies; the shared one never runs (shared config wins over global in git)."""
+    repo, cmd, marker = _setup(tmp_path, "ssh://git@github.com/o/r.git")
+    own = tmp_path / "own.txt"
+    (tmp_path / "own.py").write_text(f"open({str(own)!r}, 'a').write('x')\nraise SystemExit(1)\n", encoding="utf-8")
+    with open(Path.home() / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write(f"[core]\n\tsshCommand = {Path(sys.executable).as_posix()} {(tmp_path / 'own.py').as_posix()}\n")
+    gitops.git(repo, "config", "core.sshCommand", cmd)
+    with pytest.raises(gitops.GitError):
+        forge.push_branch(str(repo), BRANCH)                               # the owner's (stub) ssh refused it
+    assert own.exists() and not marker.exists()
+
+
+@pytest.mark.parametrize("origin", ["ext::{cmd}", "file:///tmp/r.git", "https://github.com.evil.invalid/o/r.git",
+                                    "https://github.com@evil.invalid/o/r", "-uhttps://github.com/o/r"])
+def test_a_non_github_origin_is_refused_before_git_runs(tmp_path, home, origin):
+    repo, cmd, marker = _setup(tmp_path)
+    gitops.git(repo, "config", "remote.origin.url", origin.format(cmd=cmd))
+    with pytest.raises(forge.ForgeError, match="github.com"):
+        forge.push_branch(str(repo), BRANCH)
+    assert not marker.exists() and not _on(home)
+
+
+def test_a_failed_tracking_ref_update_does_not_fail_the_push(tmp_path, home, monkeypatch, caplog):
+    """Review R2: the branch is already pushed, so any error of the local update-ref (a timeout too) is logged."""
+    repo, _, _ = _setup(tmp_path)
+    real = gitops.git
+
+    def git(cwd, *a, **kw):
+        if a[:1] == ("update-ref",):
+            raise subprocess.TimeoutExpired("git", 1)
+        return real(cwd, *a, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    forge.push_branch(str(repo), BRANCH)
+    assert _on(home) and "tracking ref" in caplog.text
+
+
+def test_status_reports_a_git_older_than_2_31(monkeypatch, tmp_path):
+    """#1722 R6: `jarvis project github` names the git 2.31 prerequisite instead of raising GitError later."""
+    monkeypatch.setattr(gitops, "_GIT_OK", [])
+    monkeypatch.setattr(gitops, "_run", lambda cwd, *a: subprocess.CompletedProcess(a, 0, "git version 2.30.2\n", ""))
+    st = forge.status(str(tmp_path))
+    assert st["git"] is False and "2.31 or later" in st["git_error"] and st["repo"] == ""
