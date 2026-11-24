@@ -49,10 +49,15 @@ def _script(tmp_path: Path) -> tuple[Path, Path]:
     return sc, marker
 
 
-def test_an_ext_url_never_runs(tmp_path):
+def _owner_allows_ext(home: Path) -> None:
+    """protocol.ext.allow in the OWNER's config, so the test reaches the guard it names (a shared one is refused)."""
+    _cfg(home, "protocol.ext.allow", "always", file=str(home / ".gitconfig"))
+
+
+def test_an_ext_url_never_runs(tmp_path, _owner_home):
     sc, marker = _script(tmp_path)
     repo = _repo(tmp_path, f"ext::sh {sc.as_posix()}")
-    _cfg(repo, "protocol.ext.allow", "always")
+    _owner_allows_ext(_owner_home)
     with pytest.raises(forge.ForgeError, match="github.com origin"):
         forge.push_branch(str(repo), BRANCH)
     assert not marker.exists()
@@ -78,10 +83,10 @@ def test_a_shared_ssh_command_never_runs(tmp_path):
     assert not marker.exists()
 
 
-def test_a_shared_url_rewrite_to_ext_never_runs(tmp_path):
+def test_a_shared_url_rewrite_to_ext_never_runs(tmp_path, _owner_home):
     sc, marker = _script(tmp_path)
     repo = _repo(tmp_path, "https://github.com/o/r.git")
-    _cfg(repo, "protocol.ext.allow", "always")
+    _owner_allows_ext(_owner_home)
     _cfg(repo, f"url.ext::sh {sc.as_posix()} #.insteadOf", "https://github.com/")
     with pytest.raises(forge.ForgeError, match="insteadof"):
         forge.push_branch(str(repo), BRANCH)
@@ -102,7 +107,9 @@ def _local_github(tmp_path: Path, home: Path) -> Path:
                                  "url.https://evil.invalid/.pushInsteadOf", "include",
                                  "http.proxy", "http.https://github.com.proxy", "http.sslVerify", "http.sslCAInfo",
                                  "http.sslCAPath", "http.curloptResolve", "http.sslCert", "http.sslKey",
-                                 "http.extraHeader", "http.cookieFile", "remote.https://github.com/o/r.git.proxy"])
+                                 "http.extraHeader", "http.cookieFile", "remote.https://github.com/o/r.git.proxy",
+                                 "remote.https://github.com/o/r.git.pushurl", "remote.https://github.com/o/r.git.url",
+                                 "protocol.allow", "protocol.ext.allow"])
 def test_other_command_keys_in_the_shared_config_refuse_the_push(tmp_path, _owner_home, key):
     """Refused before git push starts. A regressed guard would push to the local bare repository (no network) and
     fail the test. `include`: the key sits in an included file (scope: local)."""
@@ -118,16 +125,35 @@ def test_other_command_keys_in_the_shared_config_refuse_the_push(tmp_path, _owne
         forge.push_branch(str(repo), BRANCH)
 
 
+def test_a_pushurl_on_a_remote_named_like_the_url_never_runs(tmp_path, _owner_home):
+    """Round-3 review R1: `git push <url>` resolves <url> as a remote name first, so a shared
+    `remote.<that url>.pushurl` = ext:: would reroute the push and run a command."""
+    sc, marker = _script(tmp_path)
+    _local_github(tmp_path, _owner_home)
+    repo = _repo(tmp_path, "https://github.com/o/r.git")
+    _owner_allows_ext(_owner_home)
+    _cfg(repo, "remote.https://github.com/o/r.git.pushurl", f"ext::sh {sc.as_posix()}")
+    with pytest.raises(forge.ForgeError, match="remote.https://github.com/o/r.git.pushurl"):
+        forge.push_branch(str(repo), BRANCH)
+    assert not marker.exists()
+
+
 def test_a_clean_push_reaches_the_remote_unsigned(tmp_path, _owner_home):
     """The owner's global config stays usable (here a URL rewrite to a local bare repository); a shared
-    push.gpgSign=true does not sign (a local receiver refuses signed pushes, so it would fail)."""
+    push.gpgSign=true does not sign: the negative control shows this receiver refuses a signed push. The tracking ref
+    origin/<branch> is updated as a push to `origin` would (round-3 review R3)."""
     bare = _local_github(tmp_path, _owner_home)
     repo = _repo(tmp_path, "https://github.com/o/r.git")
+    signed = subprocess.run(["git", "push", "--signed=yes", str(bare), f"{BRANCH}:{BRANCH}"], cwd=repo,
+                            capture_output=True, text=True)
+    assert signed.returncode != 0 and "does not support --signed push" in signed.stderr      # negative control
     _cfg(repo, "push.gpgSign", "true")
     forge.push_branch(str(repo), BRANCH)
     out = subprocess.run(["git", "--git-dir", str(bare), "branch", "--list", BRANCH],
                          capture_output=True, text=True)
     assert BRANCH in out.stdout
+    head = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
+    assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == head
 
 
 def test_a_push_never_recurses_into_a_submodule(tmp_path, _owner_home):
@@ -163,6 +189,26 @@ def test_a_push_never_recurses_into_a_submodule(tmp_path, _owner_home):
     ("https://github.com/o/r.git\nx", False), ("http://github.com/o/r.git", False)])
 def test_accepted_and_rejected_push_url_forms(url, ok):
     assert bool(forge._PUSH_URL.match(url)) is ok
+
+
+def test_shared_config_keys_reports_local_and_included_keys_only(tmp_path, _owner_home, monkeypatch):
+    """Round-3 review R2: the public helper the push guard uses. Include files count as the repository's own (local)
+    config; the owner's global config and the command scope (env) are not reported."""
+    repo = _repo(tmp_path, "https://github.com/o/r.git")
+    inc = tmp_path / "inc.cfg"
+    _cfg(repo, "core.askPass", "x", file=str(inc))
+    _cfg(repo, "include.path", str(inc))
+    _cfg(_owner_home, "core.sshCommand", "ssh", file=str(_owner_home / ".gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'core.gitproxy'='x'")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.alternaterefscommand")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "x")
+    assert sorted(gitops.shared_config_keys(repo, r"^core\.(askpass|sshcommand|gitproxy|alternaterefscommand)$")) \
+        == ["core.askpass"]
+    _cfg(repo, "include.path", str(tmp_path / "missing" / "x"))
+    (repo / ".git" / "config").write_text("[broken\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="cannot read"):
+        gitops.shared_config_keys(repo, r"^core\.")
 
 
 def test_status_reports_a_git_older_than_2_31(monkeypatch, tmp_path):

@@ -100,6 +100,18 @@ def _pairs(out: str) -> list[tuple[str, str]]:
     return [(scope, entry.split("\n", 1)[0]) for scope, entry in zip(parts[0::2], parts[1::2])]
 
 
+def shared_config_keys(cwd: str | Path, pattern: str) -> list[str]:
+    """Keys matching `pattern` (a `git config --get-regexp` regexp) that the repository's shared config sets: the
+    local and worktree scopes, their include.path/includeIf files included (git reports those under the including
+    scope). The command scope (GIT_CONFIG_PARAMETERS/COUNT) never reaches git here: child_env drops it. Fails closed:
+    an unreadable config raises GitError (#1722)."""
+    require_git(cwd)
+    p = _run(cwd, "config", "--show-scope", "-z", "--get-regexp", pattern)
+    if p.returncode not in (0, 1):                                        # 1: no key matched (or not a repository)
+        raise GitError(f"cannot read the shared git config: {(p.stderr or '').strip()}"[:300])
+    return [k for scope, k in _pairs(p.stdout) if scope in _SHARED_SCOPES]
+
+
 def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
     """Command-scope overrides (GIT_CONFIG_COUNT/KEY/VALUE env, git 2.31+: any subsection name, `=` included, is
     safe) that blank every driver command the repository's shared config names, include.path/includeIf files
