@@ -89,7 +89,8 @@ def test_shared_ssh_command_never_runs(tmp_path, home):
 
 @pytest.mark.parametrize("origin", ["ext::{cmd}", "file:///tmp/r.git", "https://github.com.evil.invalid/o/r.git",
                                     "https://github.com@evil.invalid/o/r", "-uhttps://github.com/o/r",
-                                    "https://u:tok@github.com/o/r.git"])
+                                    "https://u:tok@github.com/o/r.git", "https://github.com/../x",
+                                    "https://github.com/o/..", "https://github.com/-o/r", "git@github.com:o/.r"])
 def test_a_non_github_origin_is_refused_before_git_runs(tmp_path, home, origin):
     repo, cmd, marker = _setup(tmp_path)
     gitops.git(repo, "config", "remote.origin.url", origin.format(cmd=cmd))
@@ -151,7 +152,25 @@ def test_a_failed_tracking_ref_update_does_not_fail_the_push(tmp_path, home, mon
 
 def test_status_reports_a_git_older_than_2_31(monkeypatch, tmp_path):
     """#1722 R6: `jarvis project github` names the git 2.31 prerequisite instead of raising GitError later."""
-    monkeypatch.setattr(gitops, "_GIT_OK", [])
-    monkeypatch.setattr(gitops, "_run", lambda cwd, *a: subprocess.CompletedProcess(a, 0, "git version 2.30.2\n", ""))
+    def old_git(cwd):   # round 3 R5: stub the public check, not gitops internals
+        raise gitops.GitError("JARVES needs git 2.31 or later (found: 2.30)")
+    monkeypatch.setattr(gitops, "require_git", old_git)
     st = forge.status(str(tmp_path))
     assert st["git"] is False and "2.31 or later" in st["git_error"] and st["repo"] == ""
+
+
+def test_a_failed_temp_cleanup_does_not_fail_the_push(tmp_path, home, monkeypatch, caplog):
+    """Round 3 R2: on Windows git can still hold a file in the temporary repository; the push already succeeded."""
+    repo, _, _ = _setup(tmp_path)
+    seen, real = [], forge.shutil.rmtree
+
+    def rmtree(p, *a, **kw):
+        seen.append(p)
+        raise PermissionError(13, "in use", p)
+    monkeypatch.setattr(forge.shutil, "rmtree", rmtree)
+    forge.push_branch(str(repo), BRANCH)
+    assert _on(home) and seen and "temporary push repository" in caplog.text
+    sha = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
+    assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
+    for p in seen:
+        real(p, ignore_errors=True)

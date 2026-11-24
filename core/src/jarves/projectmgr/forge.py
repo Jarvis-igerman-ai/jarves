@@ -80,7 +80,7 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
 # no user/token in an https URL (git's error text could carry it into logs; the owner's credential helper signs in)
 PUSH_URL_FORMS = "https://github.com/OWNER/REPO, ssh://git@github.com[:22]/OWNER/REPO or git@github.com:OWNER/REPO"
 _PUSH_URL = re.compile(r"^(?:https://(?i:github\.com)/|ssh://git@(?i:github\.com)(?::22)?/"
-                       r"|git@(?i:github\.com):)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(?:\.git)?/?\Z")
+                       r"|git@(?i:github\.com):)[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*?(?:\.git)?/?\Z")
 
 
 def push_branch(path: str, branch: str) -> None:
@@ -100,12 +100,18 @@ def push_branch(path: str, branch: str) -> None:
         raise ForgeError("JARVES cannot push from a shallow clone: run git fetch --unshallow in the project first")
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
     objects = gitops.git(path, "rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
-    with tempfile.TemporaryDirectory(prefix="jarves-push-") as tmp:
+    tmp = tempfile.mkdtemp(prefix="jarves-push-")
+    try:
         gitops.git(tmp, "init", "-q", "--bare")
         # bytes: a text-mode "\r\n" on Windows would make git read the path as "objects\r" (CI, round 1)
         (Path(tmp) / "objects" / "info" / "alternates").write_bytes((objects + "\n").encode("utf-8"))
         gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", url, f"{sha}:refs/heads/{branch}",
                    timeout=300, ident=False)
+    finally:
+        try:   # a file git still holds open on Windows must not turn a finished push into a failure (round 3 R2)
+            shutil.rmtree(tmp)
+        except OSError as e:
+            _log.warning("could not remove the temporary push repository %s: %s", tmp, e)
     try:
         gitops.git(path, "update-ref", f"refs/remotes/origin/{branch}", sha)
     except (gitops.GitError, OSError, subprocess.SubprocessError) as e:
