@@ -31,7 +31,8 @@ def test_protected_environment_passes():
 
 def test_unprotected_or_malformed_environment_is_refused():
     auto_created = {"name": "stable-release", "protection_rules": [], "deployment_branch_policy": None}
-    assert len(guard.problems(auto_created, {"branch_policies": []})) == 3
+    # the rule list is not consulted for a non-custom policy (it is not fetched then, review R2)
+    assert len(guard.problems(auto_created, None)) == 2
     no_reviewers = dict(PROTECTED, protection_rules=[{"type": "required_reviewers", "reviewers": []}])
     assert any("reviewer" in p for p in guard.problems(no_reviewers, TAG_ONLY))
     any_branch = dict(PROTECTED, deployment_branch_policy={"protected_branches": True, "custom_branch_policies": False})
@@ -43,13 +44,40 @@ def test_unprotected_or_malformed_environment_is_refused():
 
 def test_branch_rules_or_missing_tag_rule_are_refused():
     # R1: a custom policy that also admits a branch (main, *) is not tag-only
-    mixed = {"branch_policies": [{"name": "v*.*.*", "type": "tag"}, {"name": "main", "type": "branch"}]}
+    mixed = {"total_count": 2, "branch_policies": [{"name": "v*.*.*", "type": "tag"}, {"name": "main", "type": "branch"}]}
     assert any("main" in p for p in guard.problems(PROTECTED, mixed))
-    only_branch = {"branch_policies": [{"name": "*", "type": "branch"}]}
+    only_branch = {"total_count": 1, "branch_policies": [{"name": "*", "type": "branch"}]}
     found = guard.problems(PROTECTED, only_branch)
     assert any("no tag" in p for p in found) and any("branch" in p for p in found)
     for bad in (None, [], {"branch_policies": "x"}, {"branch_policies": ["x"]}):
         assert any("not readable" in p for p in guard.problems(PROTECTED, bad)), bad
+
+
+def test_incomplete_policy_page_is_refused():
+    # review R1: a branch rule on a later page must not be missed; refuse unless one page holds every rule
+    truncated = dict(TAG_ONLY, total_count=31)
+    assert any("incomplete" in p for p in guard.problems(PROTECTED, truncated))
+    for total in (None, "1", True):
+        assert any("incomplete" in p for p in guard.problems(PROTECTED, dict(TAG_ONLY, total_count=total))), total
+
+
+def test_policies_fetched_only_for_a_custom_policy(monkeypatch, capsys):
+    calls = []
+
+    def fake_gh(path):
+        calls.append(path)
+        if path.endswith("/stable-release"):
+            return dict(PROTECTED, deployment_branch_policy=None)
+        raise RuntimeError("404")
+
+    monkeypatch.setattr(guard, "_gh", fake_gh)
+    assert guard.main(["--repo", "o/r"]) == 1
+    out = capsys.readouterr().out
+    assert calls == ["repos/o/r/environments/stable-release"] and "not limited to selected tags" in out
+    calls.clear()
+    monkeypatch.setattr(guard, "_gh", lambda path: calls.append(path) or (PROTECTED if path.endswith("release") else TAG_ONLY))
+    assert guard.main(["--repo", "o/r"]) == 0
+    assert calls[1] == "repos/o/r/environments/stable-release/deployment-branch-policies?per_page=100"
 
 
 def test_admin_bypass_is_a_warning(tmp_path, capsys):

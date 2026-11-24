@@ -31,12 +31,15 @@ def problems(env: object, policies: object) -> list[str]:
     rules = rules if isinstance(rules, list) else []
     if not any(isinstance(r, dict) and r.get("type") == "required_reviewers" and r.get("reviewers") for r in rules):
         out.append("no required reviewer is set (Settings, Environments, Required reviewers)")
-    policy = env.get("deployment_branch_policy")
-    if not (isinstance(policy, dict) and policy.get("custom_branch_policies") is True):
+    if not _custom(env):
         out.append("deployments are not limited to selected tags (add the tag rule v*.*.*)")
+        return out  # the rule list only exists for a custom policy; it is not fetched then
     entries = policies.get("branch_policies") if isinstance(policies, dict) else None
+    total = policies.get("total_count") if isinstance(policies, dict) else None
     if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
         out.append("the deployment policy list is not readable")
+    elif not isinstance(total, int) or isinstance(total, bool) or total != len(entries):
+        out.append(f"the deployment policy list is incomplete ({len(entries)} of {total} rules read)")
     else:
         if not any(e.get("type") == "tag" for e in entries):
             out.append("no tag deployment rule is set (add the tag rule v*.*.*)")
@@ -44,6 +47,11 @@ def problems(env: object, policies: object) -> list[str]:
         if branches:
             out.append(f"branch deployment rules are allowed ({', '.join(branches)[:200]}); keep only the tag rule")
     return out
+
+
+def _custom(env: dict) -> bool:
+    policy = env.get("deployment_branch_policy")
+    return isinstance(policy, dict) and policy.get("custom_branch_policies") is True
 
 
 def warnings(env: object) -> list[str]:
@@ -78,7 +86,9 @@ def main(argv: list[str] | None = None) -> int:
             env, policies = _load(args.from_file), _load(args.policies_file)
         else:
             base = f"repos/{args.repo}/environments/{ENV_NAME}"
-            env, policies = _gh(base), _gh(f"{base}/deployment-branch-policies")
+            env = _gh(base)
+            # one page of up to 100 rules; problems() refuses when total_count says more exist
+            policies = _gh(f"{base}/deployment-branch-policies?per_page=100") if isinstance(env, dict) and _custom(env) else None
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"::error::cannot read the {ENV_NAME} environment, refusing the publish (#544): {exc}")
         return 1
