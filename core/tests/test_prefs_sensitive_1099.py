@@ -24,6 +24,13 @@ KEYS = [
     "the token for my work github account is abc12345",
     "my openai key is abc12345",
     "Remember aB3xY7qL9mN2pR5tV8wZ1kC4",                                # random mixed case, not camelCase words
+    # #1099 review R1: hex secrets (non-SHA length, or SHA length next to a key word)
+    "remember 5f4dcc3b5aa765d61d8327deb882cf99",                        # 32 hex
+    "api secret 9fceb02d0ae598e95dc970b74767f19372d61af8",              # 40 hex beside a key word
+    "המפתח שלי 9fceb02d0ae598e95dc970b74767f19372d61af8",               # Hebrew key word beside 40 hex
+    # #1099 review R2 decision: "keyword: <plain word>" fails closed (a dev task can drop the colon)
+    "fix token: refresh expiry",
+    "tokens: rotate weekly",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -53,6 +60,10 @@ PLAIN = [
     "rename handleOAuth2CallbackResponse in the auth module",
     "call getUserPreferences2Async on start",
     "the key is under the mat",
+    # #1099 review R1: git SHA lengths without a key word, and low-entropy hex, stay allowed
+    "use sha256 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+    "merged as 9fceb02d0ae598e95dc970b74767f19372d61af8 yesterday",
+    "abababababababababababababab1a1a1a",            # low-entropy hex filler
 ]
 
 

@@ -57,8 +57,8 @@ _KEY_VALUE = re.compile(
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
     r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
-# split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
-# and neither is a camelCase name built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback).
+# split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys, and neither is a camelCase name built from
+# words of 2+ lowercase letters and short numbers (handleOAuth2Callback). Pure hex is judged by _hex_secret instead.
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
@@ -69,9 +69,29 @@ def _entropy(s: str) -> float:
     return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
 
 
+# #1099 review R1: a hex secret (32+ hex chars, e.g. an MD5-style key) is refused unless it has a git SHA length
+# (40 or 64), and a SHA-length one is refused too when a key/secret word stands within ~20 characters of it.
+_HEX_RUN = re.compile(r"(?<![A-Za-z0-9])[0-9a-fA-F]{32,}(?![A-Za-z0-9])")
+_SHA_LENGTHS = (40, 64)
+_HEX_WORD = re.compile(rf"{_KEY_WORD}|\b(?:keys?|secrets?|passwords?)\b|מפתח|סוד", re.I)
+HEX_ENTROPY_BITS = 3.0            # random hex of 32+ chars sits near 3.8; "aaaa...1111" style filler stays allowed
+
+
+def _hex_secret(text: str) -> bool:
+    for m in _HEX_RUN.finditer(text):
+        h = m.group()
+        if not (re.search(r"[A-Fa-f]", h) and re.search(r"\d", h)) or _entropy(h) < HEX_ENTROPY_BITS:
+            continue
+        near = text[max(0, m.start() - 20):m.start()] + " " + text[m.end():m.end() + 20]
+        if len(h) not in _SHA_LENGTHS or _HEX_WORD.search(near):
+            return True
+    return False
+
+
 def _keylike(text: str) -> bool:
-    return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
-               and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
+    return _hex_secret(text) or any(
+        re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
+        and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
 
 
 # #1516: an unbroken base32 run (A-Z, 2-7; TOTP/2FA seeds) of 16+ chars. Refused when it has two or more separate
