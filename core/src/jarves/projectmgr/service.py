@@ -99,6 +99,7 @@ class Manager(StageEngine):
         recorded start time still matches (#1098: a reused pid is another program), then requeue once; a task that
         was interrupted max_attempts times fails instead of looping."""
         for p in self.db.projects():
+            gitops.register_project(self.home, p["id"], p["path"])   # its worktrees are checked on first use (#1533)
             for t in self.db.tasks(p["id"], ("running", "review")):
                 _kill_owned(t)
                 stages = self._stages(p, t)

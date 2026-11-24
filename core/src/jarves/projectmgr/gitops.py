@@ -83,7 +83,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
     config-defined hooks (`hook.<name>.command`, newer git) are covered by the shared-file guard below (#1533)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
-    pin = _pin_of(cwd)
+    pin = _pin_of(cwd, adopt=_guard)
     common = pin[1] if pin else _find_common(cwd) if _guard and (_GUARDS or _LAST) else None
     keys = [k for k in (_user_key(), common) if k] if _guard and (_GUARDS or _LAST) else []
     why = next((w for k in keys if (w := _guard_git(k))), "")
@@ -114,20 +114,20 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # bytes go to a new `<name>.jarves-rejected-<time>-<n>-<random>` file, the newest KEEP_REJECTED per file are kept)
 # and fails every run active at that moment. After the last run, a later
 # change (a left-behind process, or your own edit) is never reverted: one that adds or changes a key git may run
-# (COMMAND_KEY), or any change to an attributes file, makes JARVES git refuse to run there until JARVES restarts;
-# other config edits (`git remote add`, `push -u`) are accepted. A deleted file names no command and is ignored.
+# outside LATE_OK, or any change to an attributes file, makes JARVES git refuse to run there until JARVES restarts and
+# names the added entries; LATE_OK edits (`git remote add`, `push -u`) are accepted. A deleted file is ignored.
+# The files a guarded config includes (`include.path`, `includeIf.*.path`) are guarded with it (review R1 of 82f81a11).
 # JARVES's own git never writes them (`worktree add --no-track`). The worktree's `.git` / `commondir` pointers are read
-# once, when JARVES creates (or, after a restart, first opens and checks) the worktree; every later JARVES git command
+# once, when JARVES creates (or, after a restart, first uses and checks) the worktree; every later JARVES git command
 # there, or in a folder below it, runs with GIT_DIR/GIT_COMMON_DIR, so a planted pointer is never followed. Still
 # open (UNVERIFIED): a write between this check and git's own read (a parallel agent can race it); a baseline taken after a restart; the system
 # config (admin-owned) and a custom `core.attributesFile` path.
 SHARED_GIT = ("config", "config.worktree", "info/attributes")
-CONFIG_NAMES = ("config", "config.worktree", ".gitconfig")
-COMMAND_KEY = re.compile(
-    r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\.external|diff\..+\.(command|textconv)|hook\..+|"
-    r"gpg\..*program|gpg\.ssh\.defaultkeycommand|core\.(sshcommand|editor|pager|askpass|fsmonitor|hookspath|"
-    r"attributesfile|worktree|gitproxy)|credential\..*|include\..*|includeif\..*|alias\..*|pager\..*|"
-    r"sequence\.editor|.*\.(command|cmd|program|helper|driver|textconv|uploadpack|receivepack))$", re.IGNORECASE)
+# Review R2 of 82f81a11: the only config edits accepted after the last run (an allowlist; anything else refuses).
+LATE_OK = re.compile(r"^(remote\..+\.(url|pushurl|fetch)|branch\..+\.(remote|merge|rebase)|user\.[^.]+)$",
+                     re.IGNORECASE | re.DOTALL)
+HELPER_URL = re.compile(rb"^\s*[A-Za-z0-9+.-]*::")      # `ext::cmd`, `fd::` and other remote-helper transports
+INCLUDE_KEY = r"^include(if\..+)?\.path$"
 REJECTED = ".jarves-rejected-"
 KEEP_REJECTED = 5
 _SEQ = itertools.count()
@@ -136,16 +136,32 @@ _LAST: dict[str, dict] = {}             # common dir -> the files as the last ru
 _GUARD_LOCK = threading.RLock()
 _PIN: dict[str, tuple[str, str, str]] = {}  # JARVES worktree -> (its git dir, the common dir, the worktree)
 _COMMON: dict[str, str] = {}            # folder -> its common dir
+_PROJECTS: dict[str, str] = {}          # a project's JARVES folder -> the owner's repository (review R4 of 82f81a11)
+
+
+def register_project(home: Path, pid: int, repo: str) -> None:
+    """A worktree below this project's JARVES folder is pinned (and checked) on its first use after a restart."""
+    _PROJECTS[_key(project_root(home, pid))] = str(repo)
 
 
 def _key(path: str | Path) -> str:
     return os.path.normcase(os.path.realpath(str(path)))
 
 
-def _pin_of(cwd: str | Path) -> tuple[str, str, str] | None:
-    """The pin of `cwd` or of the JARVES worktree it lies in (review R2)."""
+def _pin_of(cwd: str | Path, adopt: bool = True) -> tuple[str, str, str] | None:
+    """The pin of `cwd` or of the JARVES worktree it lies in (review R2). adopt: an unpinned worktree below a
+    registered project folder is pinned now; GitError when it does not point into its repository (R4 of 82f81a11)."""
     k = _key(cwd)
-    return _PIN.get(k) or next((v for w, v in list(_PIN.items()) if k.startswith(w + os.sep)), None)
+    pin = _PIN.get(k) or next((v for w, v in list(_PIN.items()) if k.startswith(w + os.sep)), None)
+    root = next((r for r in list(_PROJECTS) if k.startswith(r + os.sep)), None) if adopt and not pin else None
+    if root:
+        d = Path(k)
+        while _key(d) != root and not (d / ".git").exists():
+            d = d.parent
+        if _key(d) != root:
+            _pin(_PROJECTS[root], d)
+            return _PIN[_key(d)]
+    return pin
 
 
 def _pin(repo: str, wt: Path) -> None:
@@ -220,6 +236,25 @@ def _name(key: str, f: Path) -> str:
     return f.as_posix() if key.startswith(USER) else f.relative_to(key).as_posix()
 
 
+def _includes(files: set[Path]) -> set[Path]:
+    """The files that these config files include, directly or through each other (review R1 of 82f81a11)."""
+    seen, todo = set(files), [f for f in files if f.name != "attributes"]
+    while todo:
+        f = todo.pop()
+        if not f.is_file():
+            continue
+        p = subprocess.run(["git", "config", "-z", "--type=path", "--file", str(f), "--get-regexp", INCLUDE_KEY],
+                           capture_output=True, timeout=30, creationflags=_NOWIN, env=child_env(),
+                           cwd=tempfile.gettempdir())
+        for e in p.stdout.split(b"\0") if p.returncode == 0 else []:
+            val = e.partition(b"\n")[2].decode("utf-8", "replace")
+            t = Path(val) if Path(val).is_absolute() else f.parent / val
+            if val and t not in seen:
+                seen.add(t)
+                todo.append(t)
+    return seen
+
+
 def _entry(f: Path) -> tuple[bytes, int] | None:
     """A baseline entry: the bytes and the mode (review R3 of 3d423b40), or None for a missing file."""
     data = _read(f)
@@ -241,30 +276,43 @@ def _differ(common: str, snap: dict) -> list[Path]:
     return [f for f in sorted(set(snap) | _shared(common)) if (now := _read(f)) is not None and now != _old(snap.get(f))]
 
 
-def _commands(data: bytes | None) -> set[bytes] | None:
-    """The `key\\nvalue` entries of config text whose key git may run; None if git cannot parse it."""
+def _entries(data: bytes | None) -> set[bytes] | None:
+    """The `key\\nvalue` entries of config text; None if git cannot parse it."""
     if not data:
         return set()
     p = subprocess.run(["git", "config", "-z", "--file", "-", "--list"], input=data, capture_output=True,
                        timeout=30, creationflags=_NOWIN, env=child_env(), cwd=tempfile.gettempdir())
-    if p.returncode != 0:
-        return None
-    return {e for e in p.stdout.split(b"\0") if COMMAND_KEY.match(e.partition(b"\n")[0].decode("utf-8", "replace"))}
+    return {e for e in p.stdout.split(b"\0") if e} if p.returncode == 0 else None
 
 
-def _late(common: str, snap: dict) -> list[str]:
-    """Shared files changed after the last run that may make git run a command; harmless edits join `snap` (R4)."""
-    bad = []
+def _late_ok(e: bytes, added: bool) -> bool:
+    key, _, val = e.partition(b"\n")
+    return bool(LATE_OK.match(key.decode("utf-8", "replace"))) and not (
+        added and key.lower().endswith((b"url", b"pushurl")) and HELPER_URL.match(val))
+
+
+def _show(e: bytes) -> str:
+    key, _, val = e.partition(b"\n")
+    v = re.sub(r"\s+", " ", val.decode("utf-8", "replace"))
+    return f"{key.decode('utf-8', 'replace')[:80]}={v[:60]}{'...' if len(v) > 60 else ''}"
+
+
+def _late(common: str, snap: dict) -> tuple[list[str], list[str]]:
+    """Shared files changed after the last run in a way outside LATE_OK, and the entries they added (review R3 of
+    82f81a11); LATE_OK edits join `snap` (review R2 of 82f81a11)."""
+    bad, added = [], []
     for f in sorted(set(snap) | _shared(common)):
         now = _read(f)
         if now is None or now == _old(snap.get(f)):
             continue
-        new, old = (_commands(now), _commands(_old(snap.get(f)))) if f.name in CONFIG_NAMES else (None, None)
-        if new is not None and old is not None and new <= old:
+        new, old = (_entries(now), _entries(_old(snap.get(f)))) if f.name != "attributes" else (None, None)
+        if new is not None and old is not None and all(_late_ok(e, e in new) for e in new ^ old):
             snap[f] = (now, stat.S_IMODE(f.stat().st_mode))
-        else:
-            bad.append(_name(common, f))
-    return bad
+            continue
+        bad.append(_name(common, f))
+        added += [_show(e) for e in sorted(new - old if new is not None and old is not None else ())
+                  if not _late_ok(e, True)]
+    return bad, added
 
 
 def _put_back(f: Path, old: tuple[bytes, int] | None) -> None:
@@ -310,12 +358,13 @@ def _guard_git(common: str) -> str:
             if common in _GUARDS:
                 names = _restore(common)
                 return f"a running agent or check {tamper_text(names)}" if names else ""
-            late = _late(common, _LAST[common]) if common in _LAST else []
+            late, added = _late(common, _LAST[common]) if common in _LAST else ([], [])
         except OSError as e:
             return f"the shared git files could not be checked or put back: {e}"
-    return (f"the shared git files ({', '.join(late[:5])}) changed after the last agent run or check ended; JARVES "
-            "left them as they are and runs no git there. If you made this change yourself, restart JARVES to accept "
-            "it (#1533)") if late else ""
+    what = f"; added: {', '.join(added[:5])}{' ...' if len(added) > 5 else ''}" if added else ""
+    return (f"the shared git files ({', '.join(late[:5])}) changed after the last agent run or check ended{what}; "
+            "JARVES left them as they are and runs no git there. Check that you made this change yourself before you "
+            "restart JARVES to accept it (#1533)") if late else ""
 
 
 def guard_enter(cwd: str | Path) -> tuple[list[str], list[str]]:
@@ -329,7 +378,7 @@ def guard_enter(cwd: str | Path) -> tuple[list[str], list[str]]:
             if why:
                 raise GitError(why)
         for k in keys:
-            _GUARDS.setdefault(k, [[], {f: _entry(f) for f in _shared(k)}])[0].append(changed)
+            _GUARDS.setdefault(k, [[], {f: _entry(f) for f in _includes(_shared(k))}])[0].append(changed)
     return keys, changed
 
 
@@ -387,6 +436,7 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     """The integration worktree, created from `base` (default: the repo's current HEAD) once."""
     wt = project_root(home, pid) / "integration"
     br = integration_branch(pid)
+    register_project(home, pid, repo)
     if (wt / ".git").exists():
         if _key(wt) not in _PIN:                # made before this JARVES started: pinned before any agent runs
             _pin(repo, wt)
@@ -406,6 +456,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
+    register_project(home, pid, repo)
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
@@ -417,6 +468,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
 def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     """A throw-away worktree at one exact commit (a release runs there, never in your folder)."""
     wt = project_root(home, pid) / "release" / sha[:12]
+    register_project(home, pid, repo)
     with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)

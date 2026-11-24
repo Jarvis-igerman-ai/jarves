@@ -201,8 +201,46 @@ def test_after_the_last_run_ordinary_owner_config_edits_are_kept_and_work_goes_o
     assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
     assert b"origin" in (repo / ".git" / "config").read_bytes()
     subprocess.run(["git", "-C", str(repo), "config", "core.sshCommand", "evil"], check=True)
-    with pytest.raises(gitops.GitError, match=r"\(config\) changed after the last"):
-        gitops.commit_all(wt, "task 2")
+    with pytest.raises(gitops.GitError, match=r"\(config\) changed after the last.*core\.sshcommand=evil"):
+        gitops.commit_all(wt, "task 2")                         # review R3 of 82f81a11: the added key is named
+
+
+@pytest.mark.parametrize("argv", [["core.alternateRefsCommand", "evil"], ["protocol.ext.allow", "always"],
+                                  ["remote.x.url", "ext::sh -c evil"], ["submodule.s.update", "!evil"]])
+def test_after_the_last_run_a_key_outside_the_allowlist_is_refused(tmp_path, argv):
+    """Review R2 of 82f81a11: late edits are accepted from an allowlist only, not missed by a denylist."""
+    repo, _home, wt, _br = _setup(tmp_path)
+    assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
+    subprocess.run(["git", "-C", str(repo), "config", *argv], check=True)
+    with pytest.raises(gitops.GitError, match=f"changed after the last.*{argv[0].lower()}="):
+        gitops.commit_all(wt, "task")
+
+
+def test_a_filter_planted_in_a_file_the_guarded_config_includes_is_put_back(tmp_path):
+    """Review R1 of 82f81a11: `include.path` / `includeIf.*.path` targets of a guarded config are guarded too."""
+    _repo, _home, wt, _br = _setup(tmp_path)
+    inc, marker = tmp_path / "inc", tmp_path / "ran"
+    (tmp_path / "user" / ".gitconfig").write_text(f"[include]\n\tpath = {inc.as_posix()}\n", encoding="utf-8")
+    r = _Planter(_plant_code(inc, wt, marker)).run("x", str(wt))
+    assert not r.ok and inc.as_posix() in r.error and not inc.exists()
+    gitops.commit_all(wt, "task")
+    assert not marker.exists()
+
+
+def test_after_a_restart_a_planted_task_worktree_pointer_is_refused_on_first_use(tmp_path, monkeypatch):
+    """Review R4 of 82f81a11: a task worktree reused after a restart is pinned (and checked) on its first use."""
+    repo, home, wt, _br = _setup(tmp_path)
+    monkeypatch.setattr(gitops, "_PIN", {})
+    monkeypatch.setattr(gitops, "_COMMON", {})
+    gitops.ensure_integration(home, str(repo), 1)                 # the project is known again
+    fake, marker = tmp_path / "fake.git", tmp_path / "ran"
+    shutil.copytree(repo / ".git", fake)
+    exec(_plant_code(fake / "config", wt, marker))
+    (fake / "worktrees" / wt.name / "commondir").write_text(str(fake), encoding="utf-8")
+    (wt / ".git").write_text(f"gitdir: {(fake / 'worktrees' / wt.name).as_posix()}\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="does not point into the repository's own git folder"):
+        gitops.commit_all(wt, "task")
+    assert not marker.exists()
 
 
 def _two(tmp_path: Path):
