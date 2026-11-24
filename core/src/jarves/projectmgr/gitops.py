@@ -85,7 +85,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     pin = _pin_of(cwd)
     common = pin[1] if pin else _find_common(cwd) if _guard and (_GUARDS or _LAST) else None
-    why = _guard_git(common) if common and _guard else ""
+    keys = [k for k in (_user_key(), common) if k] if _guard and (_GUARDS or _LAST) else []
+    why = next((w for k in keys if (w := _guard_git(k))), "")
     if why:
         if check:
             raise GitError(why)
@@ -107,16 +108,18 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # user-level git config/attributes (an agent runs as the same user, review R1). An agent, or a check running its
 # code, that writes them could name a command (filter/merge driver, config hook) that git runs for JARVES or later for
 # the owner; no git option skips them. While any agent run or check is active in a repository, JARVES keeps ONE
-# baseline of them: before every JARVES git command there and when each run ends, a change is put back (temp file +
-# os.replace, the file mode kept; the rejected bytes go to a new `<name>.jarves-rejected-<time>-<n>-<random>` file,
-# the newest KEEP_REJECTED per file are kept) and fails every run active at that moment. After the last run, a later
+# baseline of that repository's files; the user-level files have ONE baseline for the whole process, taken by the
+# first run in any repository and checked before every JARVES git command in every repository. Before such a command
+# and when each run ends, a change is put back (temp file + os.replace, the baseline's file mode; the rejected
+# bytes go to a new `<name>.jarves-rejected-<time>-<n>-<random>` file, the newest KEEP_REJECTED per file are kept)
+# and fails every run active at that moment. After the last run, a later
 # change (a left-behind process, or your own edit) is never reverted: one that adds or changes a key git may run
 # (COMMAND_KEY), or any change to an attributes file, makes JARVES git refuse to run there until JARVES restarts;
 # other config edits (`git remote add`, `push -u`) are accepted. A deleted file names no command and is ignored.
 # JARVES's own git never writes them (`worktree add --no-track`). The worktree's `.git` / `commondir` pointers are read
 # once, when JARVES creates (or, after a restart, first opens and checks) the worktree; every later JARVES git command
 # there, or in a folder below it, runs with GIT_DIR/GIT_COMMON_DIR, so a planted pointer is never followed. Still
-# open (UNVERIFIED): a write between this check and git's own read; a baseline taken after a restart; the system
+# open (UNVERIFIED): a write between this check and git's own read (a parallel agent can race it); a baseline taken after a restart; the system
 # config (admin-owned) and a custom `core.attributesFile` path.
 SHARED_GIT = ("config", "config.worktree", "info/attributes")
 CONFIG_NAMES = ("config", "config.worktree", ".gitconfig")
@@ -197,13 +200,34 @@ def _user_files() -> set[Path]:
     return {home / ".gitconfig", xdg / "config", xdg / "attributes"}
 
 
-def _shared(common: str) -> set[Path]:
-    c = Path(common)
-    return {c / n for n in SHARED_GIT} | set(c.glob("worktrees/*/config.worktree")) | _user_files()
+USER = "user:"
 
 
-def _name(common: str, f: Path) -> str:
-    return f.relative_to(common).as_posix() if f.is_relative_to(common) else f.as_posix()
+def _user_key() -> str:
+    """The user-level files have ONE baseline for the whole process, shared by every repository (review R1 of
+    3d423b40): a run in one repository must not let them be planted for, or adopted by, another one."""
+    return USER + "\n".join(sorted(str(f) for f in _user_files()))
+
+
+def _shared(key: str) -> set[Path]:
+    if key.startswith(USER):
+        return {Path(f) for f in key[len(USER):].split("\n")}
+    c = Path(key)
+    return {c / n for n in SHARED_GIT} | set(c.glob("worktrees/*/config.worktree"))
+
+
+def _name(key: str, f: Path) -> str:
+    return f.as_posix() if key.startswith(USER) else f.relative_to(key).as_posix()
+
+
+def _entry(f: Path) -> tuple[bytes, int] | None:
+    """A baseline entry: the bytes and the mode (review R3 of 3d423b40), or None for a missing file."""
+    data = _read(f)
+    return None if data is None else (data, stat.S_IMODE(f.stat().st_mode))
+
+
+def _old(e: tuple[bytes, int] | None) -> bytes | None:
+    return e[0] if e else None
 
 
 def _read(f: Path) -> bytes | None:
@@ -214,7 +238,7 @@ def _read(f: Path) -> bytes | None:
 
 
 def _differ(common: str, snap: dict) -> list[Path]:
-    return [f for f in sorted(set(snap) | _shared(common)) if (now := _read(f)) is not None and now != snap.get(f)]
+    return [f for f in sorted(set(snap) | _shared(common)) if (now := _read(f)) is not None and now != _old(snap.get(f))]
 
 
 def _commands(data: bytes | None) -> set[bytes] | None:
@@ -233,17 +257,17 @@ def _late(common: str, snap: dict) -> list[str]:
     bad = []
     for f in sorted(set(snap) | _shared(common)):
         now = _read(f)
-        if now is None or now == snap.get(f):
+        if now is None or now == _old(snap.get(f)):
             continue
-        new, old = (_commands(now), _commands(snap.get(f))) if f.name in CONFIG_NAMES else (None, None)
+        new, old = (_commands(now), _commands(_old(snap.get(f)))) if f.name in CONFIG_NAMES else (None, None)
         if new is not None and old is not None and new <= old:
-            snap[f] = now
+            snap[f] = (now, stat.S_IMODE(f.stat().st_mode))
         else:
             bad.append(_name(common, f))
     return bad
 
 
-def _put_back(f: Path, old: bytes | None) -> None:
+def _put_back(f: Path, old: tuple[bytes, int] | None) -> None:
     prefix = f"{f.name}{REJECTED}{time.time_ns():020d}-{next(_SEQ):08d}-"     # sorts oldest first, even in one tick
     fd, _keep = tempfile.mkstemp(dir=f.parent, prefix=prefix)                  # O_EXCL: never overwrites a kept copy
     with os.fdopen(fd, "wb") as h:
@@ -253,12 +277,11 @@ def _put_back(f: Path, old: bytes | None) -> None:
     if old is None:
         f.unlink()
         return
-    mode = stat.S_IMODE(f.stat().st_mode)
     fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=f".{f.name}.", suffix=".jarves")
     try:
         with os.fdopen(fd, "wb") as h:
-            h.write(old)
-        os.chmod(tmp, mode)
+            h.write(old[0])
+        os.chmod(tmp, old[1])
         os.replace(tmp, f)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -295,32 +318,46 @@ def _guard_git(common: str) -> str:
             "it (#1533)") if late else ""
 
 
+def guard_enter(cwd: str | Path) -> tuple[list[str], list[str]]:
+    """Start guarding the shared files for an agent run or a check in `cwd`: the repository's (if any) and the
+    user-level ones. Returns (keys, changed). Raises GitError when they changed since the last run."""
+    common, changed = common_dir(cwd), []
+    keys = [k for k in (common, _user_key()) if k]
+    with _GUARD_LOCK:
+        for k in keys:
+            why = "" if k in _GUARDS else _guard_git(k)
+            if why:
+                raise GitError(why)
+        for k in keys:
+            _GUARDS.setdefault(k, [[], {f: _entry(f) for f in _shared(k)}])[0].append(changed)
+    return keys, changed
+
+
+def guard_exit(token: tuple[list[str], list[str]]) -> list[str]:
+    """End it: every changed file is put back; returns the names changed meanwhile. OSError if one cannot be."""
+    keys, changed = token
+    with _GUARD_LOCK:
+        try:
+            for k in keys:
+                _restore(k)
+        finally:
+            for k in keys:
+                g = _GUARDS[k]
+                g[0] = [r for r in g[0] if r is not changed]
+                if not g[0]:
+                    _LAST[k] = g[1]
+                    del _GUARDS[k]
+    return changed
+
+
 @contextlib.contextmanager
 def shared_config_guard(cwd: str | Path):
-    """Around an agent run or a check in `cwd`. Yields a list that holds, on exit, the shared files changed meanwhile
-    (already put back). Raises GitError when they changed since the last run, OSError when they cannot be put back."""
-    common, changed = common_dir(cwd), []
-    if common is not None:
-        with _GUARD_LOCK:
-            if common not in _GUARDS:
-                why = _guard_git(common)
-                if why:
-                    raise GitError(why)
-                _GUARDS[common] = [[], {f: _read(f) for f in _shared(common)}]
-            _GUARDS[common][0].append(changed)
+    """guard_enter/guard_exit around a block. Yields the list of changed names, filled on exit."""
+    token = guard_enter(cwd)
     try:
-        yield changed
+        yield token[1]
     finally:
-        if common is not None:
-            with _GUARD_LOCK:
-                try:
-                    _restore(common)
-                finally:
-                    g = _GUARDS[common]
-                    g[0] = [r for r in g[0] if r is not changed]
-                    if not g[0]:
-                        _LAST[common] = g[1]
-                        del _GUARDS[common]
+        guard_exit(token)
 
 
 def is_repo(path: str) -> bool:

@@ -98,14 +98,23 @@ class Runner:
             check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None,
             team: bool = False) -> Result:
         """One agent run. An agent that changed the repository's shared git files fails; they are put back (#1533)."""
+        put_back = "the shared git files could not be checked or put back: "
         try:
-            with gitops.shared_config_guard(cwd) as changed:
-                r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
-                              timeout=timeout, on_start=on_start, cancel=cancel, team=team)
+            token = gitops.guard_enter(cwd)
         except gitops.GitError as e:            # they changed after the last run: no agent starts
             return Result(error=str(e))
         except OSError as e:
-            return Result(error=f"the shared git files could not be checked or put back: {e}")
+            return Result(error=put_back + str(e))
+        try:
+            r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
+                          timeout=timeout, on_start=on_start, cancel=cancel, team=team)
+        except BaseException:                   # not the guard's error (review R4): it propagates as before
+            gitops.guard_exit(token)
+            raise
+        try:
+            changed = gitops.guard_exit(token)
+        except OSError as e:
+            return Result(error=put_back + str(e), session_id=r.session_id, cost_usd=r.cost_usd, tokens=r.tokens)
         if changed:
             r.ok, r.error = False, "the agent " + gitops.tamper_text(changed)
         return r

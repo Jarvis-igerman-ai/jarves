@@ -203,3 +203,58 @@ def test_after_the_last_run_ordinary_owner_config_edits_are_kept_and_work_goes_o
     subprocess.run(["git", "-C", str(repo), "config", "core.sshCommand", "evil"], check=True)
     with pytest.raises(gitops.GitError, match=r"\(config\) changed after the last"):
         gitops.commit_all(wt, "task 2")
+
+
+def _two(tmp_path: Path):
+    for n in ("a", "b"):
+        (tmp_path / n).mkdir()
+    return _setup(tmp_path / "a"), _setup(tmp_path / "b")
+
+
+def test_a_user_config_filter_planted_during_a_run_in_one_repo_never_runs_in_another(tmp_path):
+    """Review R1 (a) of 3d423b40: repository B has no run and no baseline of its own."""
+    (_ra, _ha, wta, _), (_rb, _hb, wtb, _) = _two(tmp_path)
+    cfg, marker = tmp_path / "user" / ".gitconfig", tmp_path / "ran"
+    with gitops.shared_config_guard(wta) as changed:
+        exec(_plant_code(cfg, wtb, marker))
+        with pytest.raises(gitops.GitError, match="a running agent or check changed the shared git files"):
+            gitops.commit_all(wtb, "task")
+    assert not marker.exists() and not cfg.exists() and changed == [cfg.as_posix()]
+
+
+def test_a_run_started_in_another_repo_after_the_plant_never_adopts_or_replants_it(tmp_path):
+    """Review R1 (b) of 3d423b40: one process-wide baseline, so B never takes the planted bytes as clean."""
+    (_ra, _ha, wta, _), (_rb, _hb, wtb, _) = _two(tmp_path)
+    cfg, marker = tmp_path / "user" / ".gitconfig", tmp_path / "ran"
+    cfg.write_text("[user]\n\tname = me\n", encoding="utf-8")
+    clean = cfg.read_bytes()
+    with gitops.shared_config_guard(wta):
+        exec(_plant_code(cfg, wtb, marker))
+        ok, out = gitops.run_check(wtb, [sys.executable, "-c", "pass"])
+        assert not ok and ".gitconfig" in out and cfg.read_bytes() == clean
+    assert cfg.read_bytes() == clean                              # A's exit put back nothing planted
+    (wtb / "z.txt").write_text("z", encoding="utf-8")
+    assert gitops.commit_all(wtb, "task") and not marker.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_the_put_back_file_gets_the_baseline_mode_not_the_agents(tmp_path):
+    """Review R3 of 3d423b40: an agent that also ran chmod does not keep its mode."""
+    repo, _home, wt, _br = _setup(tmp_path)
+    cfg = repo / ".git" / "config"
+    cfg.chmod(0o644)
+    code = f"import os; p = {str(cfg)!r}; open(p, 'a').write('#x\\n'); os.chmod(p, 0o666)"
+    assert not gitops.run_check(wt, [sys.executable, "-c", code])[0]
+    assert cfg.stat().st_mode & 0o777 == 0o644
+
+
+def test_an_oserror_from_the_agent_run_itself_is_not_reported_as_a_put_back_failure(tmp_path):
+    """Review R4 of 3d423b40: only the guard's own OSError becomes the "could not be put back" result."""
+    _repo, _home, wt, _br = _setup(tmp_path)
+
+    class _Boom(_Planter):
+        def parse(self, stdout, rc):
+            raise OSError("parser failed")
+    with pytest.raises(OSError, match="parser failed"):
+        _Boom("pass").run("x", str(wt))
+    assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")    # the guard was closed
