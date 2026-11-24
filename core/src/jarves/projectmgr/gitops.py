@@ -69,6 +69,43 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+# (#1390) config keys whose value is a command git runs: filters on checkout/add/merge, merge drivers on a merge,
+# diff drivers and diff.external on a diff, whenever a .gitattributes or `.git/info/attributes` entry names them
+_DRIVER_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process|required)|merge\.(.+)\.driver"
+                         r"|diff\.(.+)\.(command|textconv)|diff\.external)$", re.S)
+_SHARED_SCOPES = ("local", "worktree")      # the repository's own config: agents can write it through `.git`
+
+
+def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
+    """Command-scope overrides (GIT_CONFIG_COUNT/KEY/VALUE env: any subsection name, `=` included, is safe) that
+    blank every driver command the repository's shared config names, include.path/includeIf files included (#1390).
+    A blank filter is a pass-through (required=false), a blank merge driver fails the merge (it conflicts), a blank
+    diff driver fails the command, so git() adds --no-ext-diff --no-textconv to its own `git diff` calls. The system and global config (the owner's own, e.g. Git LFS) stay as they are unless the
+    shared config names the same driver. Fails closed: an unreadable shared config raises GitError. Residual: a key
+    an agent adds between this read and the command itself is not seen (one read per call)."""
+    p = subprocess.run(["git", "config", "--show-scope", "-z", "--get-regexp", r"^(filter|merge|diff)\."],
+                       cwd=str(cwd), capture_output=True, text=True, timeout=30, creationflags=_NOWIN,
+                       env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8", errors="replace")
+    if p.returncode not in (0, 1):                                        # 1: no key matched (or not a repository)
+        raise GitError(("cannot read the shared git config: " + (p.stderr or "").strip())[:300])
+    parts = (p.stdout or "").split("\0")
+    keys: dict[str, str] = {}
+    for scope, entry in zip(parts[0::2], parts[1::2]):
+        key = entry.split("\n", 1)[0]
+        m = _DRIVER_KEY.match(key)
+        if scope not in _SHARED_SCOPES or not m:
+            continue
+        if m.group(2) is not None:                                        # every command of that filter, not one
+            keys.update({f"filter.{m.group(2)}.{k}": "" for k in ("clean", "smudge", "process")})
+            keys[f"filter.{m.group(2)}.required"] = "false"
+        else:
+            keys[key] = ""
+    env = {"GIT_CONFIG_COUNT": str(len(keys))} if keys else {}
+    for i, (k, v) in enumerate(keys.items()):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    return env
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
@@ -76,13 +113,17 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
+    JARVES merges into the owner's branch. Commands named in the shared config by filter/merge/diff drivers are
+    blanked (#1390, see shared_config_overrides); the editors are `:`. Not covered: gpg.program, core.sshCommand,
+    credential helpers and config-defined hooks (`hook.<name>.command`, newer git)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":",
+                     **shared_config_overrides(cwd)})
+    if args[:1] == ("diff",):          # a blank diff driver fails the diff; these flags show the plain text instead
+        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
