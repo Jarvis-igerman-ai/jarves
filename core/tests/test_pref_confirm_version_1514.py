@@ -91,5 +91,5 @@ async def test_voice_confirm_handler_that_was_never_shown_the_wording_does_not_c
     p = prefs_mod.Preferences(open_db(home))
     pid = p.suggest(A, "I said so", "voice")["item"]["id"]
     tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
-    r = await tool.handler(prefs_mod.IdArgs(id=pid))                     # no approval step ran (nothing was shown)
+    r = await tool.handler(tool.args(id=pid))                            # no approval step ran (nothing was shown)
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
