@@ -1,0 +1,1 @@
+- Fixed: the workflow access.token and sessions.json on Windows now also drop explicit OWNER RIGHTS, SYSTEM and Administrators grants, so only the current user can read them; a Windows-only test reads the real ACL after creation (JAR-450, supersedes JAR-260; #824).
