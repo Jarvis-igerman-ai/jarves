@@ -99,6 +99,10 @@ jobs:
       - name: Plan (dry run)
         if: ${{ env.DRY_RUN == 'true' }}
         run: python3 packaging/release.py public-publish --dir dist --dry-run
+      - name: Refuse unless stable-release is a protected environment (#544)
+        # GitHub creates a missing environment on first use without protection; read it and fail closed
+        if: ${{ github.ref_type == 'tag' && env.DRY_RUN != 'true' }}
+        run: python3 core/tools/release_env_guard.py --repo "$GITHUB_REPOSITORY"
       - name: Publish the stable release (signed latest.json, newest 3 kept)
         # #544: the only step that reads the release secrets requires a real tag ref on its own, not only via DRY_RUN
         if: ${{ github.ref_type == 'tag' && env.DRY_RUN != 'true' }}
