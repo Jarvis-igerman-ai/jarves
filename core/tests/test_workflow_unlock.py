@@ -250,7 +250,7 @@ class UnlockTests(unittest.TestCase):
         for bad in ({"x": 1}, [1, {"y": 2}, "f" * 64], "nope"):        # unknown digest, wrong types, not a list
             stored["owner"] = bad
             (self.home / "sessions.json").write_text(json.dumps(stored), encoding="utf-8")
-            self.assertEqual(load_owner_windows(self.home, {"f" * 64: 1.0} if bad == "nope" else {}), set(), bad)
+            self.assertEqual(load_owner_windows(self.home, {"f" * 64: 1.0} if bad == "nope" else {}), {}, bad)
         self.assertTrue(sid)
 
     def test_damaged_owner_list_after_a_restart_keeps_the_old_cancel_1416(self):
@@ -259,7 +259,7 @@ class UnlockTests(unittest.TestCase):
         stored["owner"] = {"damaged": True}
         (self.home / "sessions.json").write_text(json.dumps(stored), encoding="utf-8")
         self.restart()
-        self.assertEqual(self.server.owner_windows, set())
+        self.assertFalse(self.server.owner_windows)
         self.token_windows_try(wrong)
         self.assertFalse((self.home / unlock.FILE).exists())          # no owner window: cancelled at the shared 5
 
@@ -275,6 +275,43 @@ class UnlockTests(unittest.TestCase):
             self.cookie = cookie
             self.assertEqual([self.wrong_try(wrong)[0] for _ in range(n)], [403] * n)
         self.assertFalse((self.home / unlock.FILE).exists())          # cancelled at the shared 5, as before #1416
+
+    def test_unlock_saves_the_owner_mark_under_session_lock_without_reacquiring_it_1416(self):
+        from jarves.workflow import server as srv
+        held = []
+        real = srv.save_sessions
+        def spy(*args, **kwargs):
+            held.append(self.server.session_lock.locked())             # the _unlock block holds session_lock here
+            return real(*args, **kwargs)
+        self.login()
+        with patch.object(srv, "save_sessions", spy):
+            self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)  # no deadlock
+        self.assertEqual(held, [True])
+        self.assertFalse(self.server.session_lock.locked())
+
+    def test_only_the_2_newest_owner_windows_stay_outside_the_shared_total_1416(self):
+        windows = []
+        for _ in range(3):                                             # three windows unlock in turn
+            self.cookie = ""
+            windows.append(self.login())
+            self.server.unlock_attempts.clear()
+            self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+        self.assertEqual(len(self.server.owner_windows), 2)           # guess bound: 5 + 3 * 2 = 11 of 10,000
+        self.server.unlocked.clear()
+        shown = unlock.issue(self.home)
+        self.token_windows_try("0000" if shown != "0000" else "1111")
+        self.cookie = f"{self.server.cookie}={windows[0]}"
+        self.assertEqual(self.wrong_try(shown), (403, "shared_exhausted"))  # the oldest is a token window again
+        self.cookie = f"{self.server.cookie}={windows[2]}"
+        self.assertEqual(self.wrong_try(shown), (200, None))
+
+    def test_owner_window_ending_after_the_shared_5_cancels_the_code_1416(self):
+        owner, shown, wrong = self.owner_window_then_new_code()
+        self.token_windows_try(wrong)
+        self.assertTrue((self.home / unlock.FILE).exists())           # live for the owner window
+        self.server.sessions[owner] = time.time() - 1                  # then the owner window ends
+        self.assertEqual(self.wrong_try(shown), (403, None))           # not "shared_exhausted": the code is cancelled
+        self.assertFalse((self.home / unlock.FILE).exists())
 
     def restart(self):
         """Stop the server and start a new one on the same home (sessions.json is reloaded)."""

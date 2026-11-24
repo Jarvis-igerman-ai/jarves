@@ -105,7 +105,8 @@ def access_token(home: Path) -> str:
 SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
 UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
-UNLOCK_WRONG_TOTAL = 5        # over token-only sessions; owner windows (#1416) add 3 each: 5 + 3k guesses of 10,000
+UNLOCK_WRONG_TOTAL = 5        # over token-only sessions; owner windows (#1416) add 3 each
+UNLOCK_OWNER_WINDOWS = 2      # #1416: newest owner windows kept, so the bound is 5 + 3 * 2 = 11 guesses of 10,000
 
 
 @dataclass
@@ -130,8 +131,7 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
             return {}
-        owner = raw.get("owner")
-        owner = {k for k in owner if isinstance(k, str)} if isinstance(owner, list) else set()
+        owner = owner_list(raw)
 
         def limit(k: str) -> float:  # #1416: only an owner window (unlocked, up to 1 week) lives past a login's 12 h
             return now + (max(SESSION_TTL_S, unlock.UNLOCK_TTL_S) if k in owner else SESSION_TTL_S)
@@ -142,17 +142,22 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
         return {}
 
 
-def load_owner_windows(home: Path, live: dict[str, float]) -> set[str]:
-    """Digests of stored owner windows (#1416) that are still live sessions; anything damaged means none."""
+def owner_list(raw) -> list[str]:
+    """The newest UNLOCK_OWNER_WINDOWS stored owner digests (#1416), oldest first; anything damaged means none."""
+    rows = raw.get("owner") if isinstance(raw, dict) else None
+    return [k for k in rows if isinstance(k, str)][-UNLOCK_OWNER_WINDOWS:] if isinstance(rows, list) else []
+
+
+def load_owner_windows(home: Path, live: dict[str, float]) -> dict[str, None]:
+    """Stored owner windows (#1416) that are still live sessions, oldest first; anything damaged means none."""
     try:
         raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return set()
-    rows = raw.get("owner") if isinstance(raw, dict) else None
-    return {k for k in rows if isinstance(k, str) and k in live} if isinstance(rows, list) else set()
+        return {}
+    return dict.fromkeys(k for k in owner_list(raw) if k in live)
 
 
-def save_sessions(home: Path, digests: dict[str, float], owner: list[str]) -> None:
+def save_sessions(home: Path, digests: dict[str, float], owner: tuple[str, ...] | list[str] = ()) -> None:
     """Atomic owner-only write of session digests (never the session id or the access token)."""
     private_directory(Path(home))
     path = Path(home) / "sessions.json"
@@ -160,7 +165,7 @@ def save_sessions(home: Path, digests: dict[str, float], owner: list[str]) -> No
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     owner_only_file(tmp)  # before writing; the ACL moves with the file on replace (#824)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "sessions": digests, "owner": owner}, f)
+        json.dump({"version": 1, "sessions": digests, "owner": list(owner)}, f)
     os.replace(tmp, path)
 
 
@@ -187,12 +192,12 @@ class Server(ThreadingHTTPServer):
         self.restored: dict[str, float] = load_sessions(self.home)
         # #1416: digests of owner windows, i.e. sessions that once typed a correct terminal code. Their wrong tries
         # stay outside the shared total, so token-only windows cannot cancel a code for the owner's window.
-        self.owner_windows: set[str] = load_owner_windows(self.home, self.restored)
+        self.owner_windows: dict[str, None] = load_owner_windows(self.home, self.restored)  # ordered, oldest first
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
-        # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
+        # cancel the owner's code; UNLOCK_WRONG_TOTAL over token-only sessions still cancels it once no owner window (#1416) is live.
         self.unlock_wrong = UnlockWrong()
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
@@ -222,7 +227,7 @@ class Server(ThreadingHTTPServer):
         digests.update({session_key(self.token, s): end for s, end in self.sessions.items()})
         self.prune_owner_windows(now)
         try:
-            save_sessions(self.home, digests, sorted(self.owner_windows))
+            save_sessions(self.home, digests, list(self.owner_windows))
         except OSError:
             pass  # persistence is a convenience; the live session still works in memory
 
@@ -230,7 +235,15 @@ class Server(ThreadingHTTPServer):
         """Keep only owner windows whose session is still live (#1416). Caller holds session_lock."""
         live = {k for k, end in self.restored.items() if end > now}
         live.update(session_key(self.token, s) for s, end in self.sessions.items() if end > now)
-        self.owner_windows &= live
+        self.owner_windows = {k: None for k in self.owner_windows if k in live}
+
+    def add_owner_window(self, session: str) -> None:
+        """Mark a session as the newest owner window, keeping at most UNLOCK_OWNER_WINDOWS. Caller holds session_lock."""
+        digest = session_key(self.token, session)
+        self.owner_windows.pop(digest, None)
+        self.owner_windows[digest] = None
+        while len(self.owner_windows) > UNLOCK_OWNER_WINDOWS:
+            self.owner_windows.pop(next(iter(self.owner_windows)))
 
     def server_close(self) -> None:
         self.stopping.set()
@@ -524,6 +537,11 @@ class Handler(BaseHTTPRequestHandler):
             wrong = self.server.unlock_wrong
             self.server.prune_owner_windows(now)  # an ended owner window must not keep the code live
             owner = session_key(self.server.token, session) in self.server.owner_windows
+            if not owner and wrong.total >= UNLOCK_WRONG_TOTAL and not self.server.owner_windows:
+                path.unlink(missing_ok=True)  # the owner window it was kept for has ended: cancel as before #1416
+                self.server.unlock_wrong = UnlockWrong()
+                self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
+                return
             if not owner and wrong.total >= UNLOCK_WRONG_TOTAL:
                 # #1416: token-only windows used the shared tries; the code stays live for the owner's window.
                 self._json(403, {"error": "too many wrong codes; use the code in the window where you unlocked before, "
@@ -538,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
                 wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
-                wrong.total += 0 if owner else 1  # guess bound: 5 shared + 3 per owner window
+                wrong.total += 0 if owner else 1  # guess bound: 5 shared + 3 per owner window (at most 2)
                 if not owner and wrong.total >= UNLOCK_WRONG_TOTAL and not self.server.owner_windows:
                     path.unlink(missing_ok=True)
                     self.server.unlock_wrong = UnlockWrong()
@@ -550,7 +568,7 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlocked[session] = now + ttl
             # The session must live as long as the unlock window the UI promises (same single session, no extra one).
             self.server.sessions[session] = max(self.server.sessions.get(session, 0), now + ttl)
-            self.server.owner_windows.add(session_key(self.server.token, session))
+            self.server.add_owner_window(session)
             self.server.persist_sessions(now)  # store the owner mark and the longer session end
         self._json(200, {"ok": True, "result": {"remaining_s": ttl}},
                    {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max(ttl, 43200)}"})

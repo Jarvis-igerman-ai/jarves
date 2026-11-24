@@ -89,6 +89,9 @@ class SessionPersistTests(unittest.TestCase):
         week = {"sessions": {good: now + 2 * srv.SESSION_TTL_S, old: now + 2 * srv.SESSION_TTL_S}, "owner": [old]}
         (self.home / "sessions.json").write_text(json.dumps(week), encoding="utf-8")
         self.assertEqual(set(srv.load_sessions(self.home, now)), {old})  # #1416: only owner windows live past 12 h
+        for bad in ({old: 1}, [1, [old]], old):                        # a damaged owner list keeps the 12 h cap
+            (self.home / "sessions.json").write_text(json.dumps(dict(week, owner=bad)), encoding="utf-8")
+            self.assertEqual(srv.load_sessions(self.home, now), {}, bad)
         (self.home / "sessions.json").write_text("{broken", encoding="utf-8")
         self.assertEqual(srv.load_sessions(self.home, now), {})
 

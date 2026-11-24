@@ -32,7 +32,7 @@ def test_824_secrets_are_locked_down_before_they_are_written(monkeypatch, tmp_pa
     monkeypatch.setattr(server, "owner_only_file",
                         lambda p: sizes.setdefault(Path(p).name.split(".")[0], Path(p).stat().st_size) is not None)
     server.access_token(tmp_path)
-    server.save_sessions(tmp_path, {}, [])
+    server.save_sessions(tmp_path, {})
     assert sizes == {"access": 0, "sessions": 0}  # no window where the secret exists with the inherited ACL
 
 
