@@ -76,9 +76,10 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
 
-# (#1722) the push URL: github.com over https or ssh only. No `<helper>::` (ext::, fd::), no local path, no option.
+# (#1722) the push URL: github.com over https or ssh only. No `<helper>::` (ext::, fd::), no local path, no option,
+# no user/token in an https URL (git's error text could carry it into logs; the owner's credential helper signs in)
 PUSH_URL_FORMS = "https://github.com/OWNER/REPO, ssh://git@github.com[:22]/OWNER/REPO or git@github.com:OWNER/REPO"
-_PUSH_URL = re.compile(r"^(?:https://(?:[^@/\s:]+(?::[^@/\s]*)?@)?(?i:github\.com)/|ssh://git@(?i:github\.com)(?::22)?/"
+_PUSH_URL = re.compile(r"^(?:https://(?i:github\.com)/|ssh://git@(?i:github\.com)(?::22)?/"
                        r"|git@(?i:github\.com):)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(?:\.git)?/?\Z")
 
 
@@ -88,7 +89,8 @@ def push_branch(path: str, branch: str) -> None:
     core.sshCommand, credential helpers, gpg...). So git push runs in a fresh JARVES-made bare repository that borrows
     the project's objects (alternates): only the owner's system/global config applies, and nothing the project config
     adds later reaches the push. The one value read from it, origin's URL, must be a github.com https/ssh URL.
-    Afterwards refs/remotes/origin/<branch> is set locally, best effort (the branch is already pushed)."""
+    Afterwards refs/remotes/origin/<branch> is set locally, best effort (the branch is already pushed); no
+    `reference-transaction` hook runs there, as gitops.git pins core.hooksPath to NO_HOOKS on the command line."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
     url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
@@ -98,7 +100,8 @@ def push_branch(path: str, branch: str) -> None:
     objects = gitops.git(path, "rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
     with tempfile.TemporaryDirectory(prefix="jarves-push-") as tmp:
         gitops.git(tmp, "init", "-q", "--bare")
-        (Path(tmp) / "objects" / "info" / "alternates").write_text(objects + "\n", encoding="utf-8")
+        # bytes: a text-mode "\r\n" on Windows would make git read the path as "objects\r" (CI, round 1)
+        (Path(tmp) / "objects" / "info" / "alternates").write_bytes((objects + "\n").encode("utf-8"))
         gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", url, f"{sha}:refs/heads/{branch}",
                    timeout=300, ident=False)
     try:
