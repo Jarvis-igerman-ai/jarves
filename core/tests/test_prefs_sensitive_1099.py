@@ -31,6 +31,9 @@ KEYS = [
     # #1099 review R2 decision: "keyword: <plain word>" fails closed (a dev task can drop the colon)
     "fix token: refresh expiry",
     "tokens: rotate weekly",
+    # #1099 review 3: camelCase-shaped key with two number chunks; a long random ID inside a share link
+    "remember AbcdEfgh12IjklMnop34Qrst",                               # camelCase-shaped, two number chunks
+    "open https://docs.google.com/document/d/1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT/edit",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -63,7 +66,10 @@ PLAIN = [
     # #1099 review R1: git SHA lengths without a key word, and low-entropy hex, stay allowed
     "use sha256 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
     "merged as 9fceb02d0ae598e95dc970b74767f19372d61af8 yesterday",
-    "abababababababababababababab1a1a1a",            # low-entropy hex filler
+    "abababababababababababababab1a1a1a",
+    # #1099 review 3: Hebrew key words are whole words ("יסודי" is no "סוד"); a typical URL is not a key
+    "בדיקה יסודית של 9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "play https://www.youtube.com/watch?v=dQw4w9WgXcQ in the kitchen",            # low-entropy hex filler
 ]
 
 

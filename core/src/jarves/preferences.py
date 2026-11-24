@@ -59,6 +59,7 @@ _KEY_VALUE = re.compile(
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys, and neither is a camelCase name built from
 # words of 2+ lowercase letters and short numbers (handleOAuth2Callback). Pure hex is judged by _hex_secret instead.
+# Long random IDs inside URLs (share links, capability tokens) are refused on purpose: they often grant access.
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
@@ -73,8 +74,14 @@ def _entropy(s: str) -> float:
 # (40 or 64), and a SHA-length one is refused too when a key/secret word stands within ~20 characters of it.
 _HEX_RUN = re.compile(r"(?<![A-Za-z0-9])[0-9a-fA-F]{32,}(?![A-Za-z0-9])")
 _SHA_LENGTHS = (40, 64)
-_HEX_WORD = re.compile(rf"{_KEY_WORD}|\b(?:keys?|secrets?|passwords?)\b|מפתח|סוד", re.I)
+_HEX_WORD = re.compile(rf"{_KEY_WORD}|\b(?:keys?|secrets?|passwords?)\b"
+                       r"|(?<![\u05d0-\u05ea])[הובלמשכ]?(?:מפתח(?:ות)?|סוד(?:ות)?)(?![\u05d0-\u05ea])", re.I)
 HEX_ENTROPY_BITS = 3.0            # random hex of 32+ chars sits near 3.8; "aaaa...1111" style filler stays allowed
+
+
+def _camel(m: str) -> bool:
+    """A camelCase name: word chunks with at most one short number (review: AbcdEfgh12IjklMn34Opqr is a key)."""
+    return bool(_CAMEL.fullmatch(m)) and len(re.findall(r"\d+", m)) <= 1
 
 
 def _hex_secret(text: str) -> bool:
@@ -90,7 +97,7 @@ def _hex_secret(text: str) -> bool:
 
 def _keylike(text: str) -> bool:
     return _hex_secret(text) or any(
-        re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
+        re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _camel(m)
         and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
 
 
