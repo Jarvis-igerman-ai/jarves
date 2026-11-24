@@ -104,7 +104,8 @@ class Runner:
         except ValueError as e:
             return Result(error=str(e))
         try:
-            p = subprocess.Popen(spec.argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
+            argv = gitops.confined(spec.argv, cwd, git_writes=True) if check_argv and not read_only else spec.argv
+            p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
                                  creationflags=_NOWIN, encoding="utf-8", errors="replace",
                                  start_new_session=(os.name != "nt"))

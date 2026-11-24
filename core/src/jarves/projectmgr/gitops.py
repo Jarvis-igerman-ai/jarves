@@ -5,14 +5,19 @@ merges are fast-forward only after the check ran on the merged result. JARVES ne
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
+from . import confine
+
+log = logging.getLogger(__name__)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
 # files an agent may never change: they would widen the permissions of every later task or run code on its own
@@ -250,14 +255,47 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
     git(integration_wt, "merge", "--ff-only", branch)
 
 
+_CONFINE: dict[str, object] = {}
+
+
+def confine_available() -> bool:
+    """Can this machine run a command in the read-only git namespace (confine.py)? Probed once; a "no" is logged once."""
+    if "ok" not in _CONFINE:
+        why = "not Linux (tracked in #1665)"
+        if sys.platform.startswith("linux"):
+            try:
+                p = subprocess.run(confine.wrap(["true"], {"tree": os.path.dirname(confine.__file__), "ro": [], "rw": [], "mask": []}),
+                                   capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+                why = "" if p.returncode == 0 else (p.stderr.strip()[-200:] or f"exit {p.returncode}")
+            except (OSError, subprocess.SubprocessError) as e:
+                why = str(e)
+        _CONFINE["ok"] = not why
+        if why:
+            log.warning("projectmgr: check runs are not confined, the shared git files stay writable (#1592): %s", why)
+    return bool(_CONFINE["ok"])
+
+
+def confined(argv: list[str], wt: str | Path, git_writes: bool = False) -> list[str]:
+    """`argv` wrapped so that it cannot write the repository's shared git files (#1592); unchanged where unavailable.
+    git_writes: an agent's `git add`/`commit` still works (objects, refs and its own worktree metadata stay writable)."""
+    if not argv or not confine_available():
+        return argv
+    out = git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir", "--absolute-git-dir", check=False)
+    dirs = out.stdout.splitlines() if out.returncode == 0 else []
+    if len(dirs) != 2:
+        return argv                               # not a git worktree: there is no shared git dir to protect
+    return confine.wrap(argv, confine.spec(Path(dirs[0]), Path(dirs[1]), Path(wt), git_writes))
+
+
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
     """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
-    env_keep: extra variable names the owner allowed for this command (a release may need a token)."""
+    env_keep: extra variable names the owner allowed for this command (a release may need a token).
+    On Linux it runs `confined` (#1592): its code cannot write the shared `.git` config, hooks or worktree pointers."""
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
-        p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
+        p = subprocess.run(confined(argv, wt), cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
                            env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return False, "check timed out"
