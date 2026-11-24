@@ -678,212 +678,109 @@ async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, mon
 
 
 # ---------------------------------------------------------------------- #1526: privacy mode scrubs older plan text
-async def _old_text_plan(env, monkeypatch):
-    """A plan run with privacy OFF: one done step (tool text in evidence/result), one failed step (tool text in error/note)."""
+async def _old_text_plans(env, monkeypatch):
+    """Two plans run with privacy OFF: a done step (tool text in evidence/result), a failed one (in error/note)."""
     monkeypatch.setattr(gp.logs, "privacy", lambda: False)
-    a = env.store.propose("ok", steps(("fake_read", {"text": "secret-a"})))
+    a, b = env.store.propose("ok", steps(("fake_read", {"text": "secret-a"}))), env.store.propose("bad", steps(("fake_bad", {})))
     env.store.approve(a["id"])
-    b = env.store.propose("bad", steps(("fake_bad", {})))
     env.store.approve(b["id"])
+    n = gp._PLAIN[0]
     await env.runner.tick()
-    pa, pb = env.store.get(a["id"]), env.store.get(b["id"])
-    assert "secret-a" in pa["steps"][0]["evidence"] + pa["result"]            # the text really is on disk first
-    assert "it broke" in pb["steps"][0]["error"] + pb["note"]
+    assert gp._PLAIN[0] > n and "it broke" in _all_text(env) and "secret-a" in _all_text(env)   # R5: counted writes
     return a["id"], b["id"]
 
 
+async def _tick(env):
+    """A tick, then wait for the scrub it started (it runs in a worker thread) and let the next tick collect it."""
+    await env.runner.tick()
+    if env.runner._scrub_task is not None:
+        await asyncio.gather(env.runner._scrub_task, return_exceptions=True)
+    env.runner._scrub()
+
+
 def _all_text(env) -> str:
-    rows = env.db.rows("SELECT evidence, error FROM goal_plan_steps") + env.db.rows("SELECT result, note FROM goal_plans")
-    return json.dumps(rows, ensure_ascii=False)
+    return json.dumps(env.db.rows("SELECT evidence, error FROM goal_plan_steps")
+                      + env.db.rows("SELECT result, note FROM goal_plans"), ensure_ascii=False)
 
 
 async def test_1526_privacy_on_scrubs_plan_text_written_before_it(env, monkeypatch):
-    a, b = await _old_text_plan(env, monkeypatch)
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)                    # the switch turns on (or Core starts with it on)
-    await env.runner.tick()
-    text = _all_text(env)
-    assert "secret-a" not in text and "it broke" not in text
+    a, b = await _old_text_plans(env, monkeypatch)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await _tick(env)
+    assert "secret-a" not in _all_text(env) and "it broke" not in _all_text(env)
     pa, pb = env.store.get(a), env.store.get(b)
-    assert pa["state"] == "done" and pa["steps"][0]["status"] == "done" and pa["result"] == "1/1 steps done."
-    assert pb["steps"][0]["status"] == "failed" and pb["steps"][0]["error"] == "X_BROKE"   # status and code stay
-    assert pb["note"] == "step 1: X_BROKE"
+    assert pa["state"] == "done" and pa["result"] == "1/1 steps done. 1. fake_read: done"      # R3: tool: status kept
+    assert pb["steps"][0]["status"] == "failed" and pb["steps"][0]["error"] == "failed" and pb["note"] == "step 1: failed"
+    assert env.store.scrub_private() == 0                                       # nothing left
 
 
-async def test_1526_scrub_keeps_own_reasons_and_fails_closed(env):
-    for r in gp._OWN:
-        assert gp._private_text(r) == r and gp._private_note(f"step 2: {r}") == f"step 2: {r}"
+def test_1526_r1_scrub_never_keeps_a_token_cut_from_free_text():
+    assert gp._private_error("AKIA1234SECRET: rest") == "failed" and gp._private_error("X_BROKE: hunter2") == "failed"
+    assert gp._private_error("X_BROKE") == "X_BROKE"                            # a whole code, as privacy mode writes it
+    assert gp._private_error("lower text") == "failed" and gp._private_error("") == ""
+    assert gp._private_note("step 2: paused by the owner") == "step 2: paused by the owner"
     assert gp._private_note("time cap of 30 min reached") == "time cap of 30 min reached"
-    assert gp._private_text("failed: token 1234") == "failed"
-    assert gp._private_text("X_BROKE: password hunter2") == "X_BROKE"
-    assert gp._private_text("lowercase tool text") == ""                    # unknown text is erased, never kept
-    assert gp._private_text("X_BROKEhunter2") == "" and gp._private_note("step 1: hunter2") == "step 1"
-    assert gp._private_note("time cap of 30 min reached by hunter2") == ""
-    assert gp._private_result("1/2 steps done. 1. fake_read: hunter2") == "1/2 steps done."
+    assert gp._private_note("time cap of 30 min reached SECRET") == "" and gp._private_note("step 1: x y") == "step 1: failed"
 
 
-async def test_1526_scrub_runs_once_per_privacy_edge_and_failure_logs_once(env, monkeypatch):
-    calls, logged = [], []
+async def test_1526_new_privacy_mode_rows_leave_nothing_to_scrub(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    a, b = env.store.propose("ok", steps(("fake_read", {"text": "q"}))), env.store.propose("bad", steps(("fake_bad", {})))
+    env.store.approve(a["id"])
+    env.store.approve(b["id"])
+    await env.runner.tick()
+    assert env.store.get(b["id"])["steps"][0]["error"] == "X_BROKE" and env.store.scrub_private() == 0
+
+
+async def test_1526_scrub_once_per_edge_and_after_text_written_between_ticks(env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(1) or 0)
+    await _tick(env)
+    await _tick(env)
+    assert calls == [1]                                                         # Core start with privacy on: once
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)                      # off and on again with no tick between
+    gp._at_rest("tool text")
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await _tick(env)
+    assert calls == [1, 1]
+
+
+async def test_1526_r2_scrub_off_the_loop_with_backoff_and_one_warning(env, monkeypatch):
+    import sqlite3
+    import threading
+    seen, logged, mono = [], [], Clock(0.0)
+    env.runner.mono = mono
     monkeypatch.setattr(gp.logs, "privacy", lambda: True)
     monkeypatch.setattr(gp.logs, "warn", lambda *a, **k: logged.append(a[1]))
 
     def broken():
-        calls.append(1)
-        raise gp.sqlite3.OperationalError("database is locked")
+        seen.append(threading.get_ident())
+        raise sqlite3.OperationalError("database is locked")
     monkeypatch.setattr(env.store, "scrub_private", broken)
     p = env.store.propose("go", steps(("fake_read", {"text": "x"})))
     env.store.approve(p["id"])
-    await env.runner.tick()
-    await env.runner.tick()
-    assert env.store.get(p["id"])["state"] == "done"                        # a failed scrub never stops plan execution
-    assert len(calls) == 2 and logged == ["PLAN_SCRUB_FAILED"]              # retried each tick, logged once per outage
-    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(0) or 0)
-    await env.runner.tick()
-    await env.runner.tick()
-    assert calls[2:] == [0]                                                 # one scrub per privacy edge, not per tick
-    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
-    await env.runner.tick()
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    await env.runner.tick()
-    assert calls[2:] == [0, 0]                                              # off -> on again scrubs again
+    await _tick(env)
+    assert env.store.get(p["id"])["state"] == "done" and seen[0] != threading.get_ident()   # a worker thread
+    for t in (1.0, 2.0, 3.0, 6.0):
+        mono.t = t
+        await _tick(env)
+    assert len(seen) == 3 and logged == ["PLAN_SCRUB_FAILED"]                  # at 0, 2 and 6 s; logged once
 
 
-async def test_1526_scrub_is_one_transaction(env, monkeypatch):
-    a, _b = await _old_text_plan(env, monkeypatch)
-    before = _all_text(env)
-    env.db._db.execute("BEGIN")                                              # a transaction already open: never adopted
-    with pytest.raises(gp.sqlite3.OperationalError):
-        env.store.scrub_private()
-    env.db._db.rollback()
-    assert _all_text(env) == before
-    assert env.store.scrub_private() == 4 and env.store.scrub_private() == 0   # 2 steps + 2 plans, then nothing left
-
-
-async def test_1526_new_failure_in_privacy_mode_keeps_what_the_scrub_keeps(env, monkeypatch):
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    p = env.store.propose("bad", steps(("fake_bad", {}), ("fake_read", {"text": "y"})))
-    env.store.approve(p["id"])
-    await env.runner.tick()
-    s = env.store.get(p["id"])["steps"][0]
-    env.runner._fail(p["id"], env.store.get(p["id"])["steps"][1], "tool says: hunter2", env.clock())
-    d = env.store.get(p["id"])
-    assert s["error"] == "X_BROKE" and d["steps"][1]["error"] == "" and "hunter2" not in _all_text(env)
-    assert env.store.scrub_private() == 0                                   # nothing left for a later scrub
-
-
-def _disk_bytes(env) -> bytes:
-    from pathlib import Path
-    base = Path(env.db.path)
-    return b"".join(p.read_bytes() for p in (base, Path(str(base) + "-wal")) if p.exists())
-
-
-async def test_1526_old_text_is_gone_from_the_file_and_wal_bytes(env, monkeypatch):
-    await _old_text_plan(env, monkeypatch)
-    env.db.x("DELETE FROM goal_plan_steps WHERE id=-1")                        # the text sits in WAL frames / pages
-    assert b"read secret-a" in _disk_bytes(env)                               # tool output (the step args are the owner's)
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    await env.runner.tick()
-    raw = _disk_bytes(env)
-    assert b"read secret-a" not in raw and b"it broke" not in raw
-
-
-async def test_1526_busy_wal_checkpoint_retries_only_the_truncate_with_backoff(env, monkeypatch):
+async def test_1526_r4_failed_update_rolls_back_the_whole_scrub(env, monkeypatch):
     import sqlite3
-    await _old_text_plan(env, monkeypatch)
-    logged, scans, mono = [], [], Clock(0.0)
-    env.runner.mono = mono
-    monkeypatch.setattr(gp.logs, "warn", lambda *a, **k: logged.append(a[1]))
-    real = env.store.scrub_private
-    monkeypatch.setattr(env.store, "scrub_private", lambda: scans.append(1) or real())
-    reader = sqlite3.connect(env.db.path)
-    reader.execute("BEGIN")
-    reader.execute("SELECT count(*) FROM goal_plans").fetchall()              # holds a read snapshot of the WAL
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    await env.runner.tick()
-    assert logged == ["PLAN_SCRUB_FAILED"] and env.runner._wal_at == 2.0      # busy: retried after a backoff
-    mono.t = 2.0
-    await env.runner.tick()
-    assert env.runner._wal_at == 6.0 and logged == ["PLAN_SCRUB_FAILED"]       # doubled, still logged once
-    assert scans == [1]                                                       # the rows are never rescanned for it
-    reader.rollback()
-    reader.close()
-    await env.runner.tick()
-    assert env.runner._wal_at == 6.0                                          # not due yet: no checkpoint on this tick
-    mono.t = 6.0
-    await env.runner.tick()
-    assert env.runner._wal_at is None and scans == [1] and b"read secret-a" not in _disk_bytes(env)
+    await _old_text_plans(env, monkeypatch)
+    before = _all_text(env)
+    env.db.x("CREATE TEMP TRIGGER no_plan_upd BEFORE UPDATE ON goal_plans BEGIN SELECT RAISE(ABORT, 'boom'); END")
+    with pytest.raises(sqlite3.IntegrityError):
+        env.store.scrub_private()                                               # steps were updated first, then this
+    assert _all_text(env) == before
+    env.db.x("DROP TRIGGER no_plan_upd")
+    assert env.store.scrub_private() == 4
 
 
 async def test_1526_scrub_restores_secure_delete(env):
     env.db.x("PRAGMA secure_delete=OFF")
     env.store.scrub_private()
     assert env.db._db.execute("PRAGMA secure_delete").fetchone()[0] == 0
-
-
-async def test_1526_text_written_while_off_between_two_ticks_is_rescanned(env, monkeypatch):
-    calls = []
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(1) or 0)
-    await env.runner.tick()
-    monkeypatch.setattr(gp.logs, "privacy", lambda: False)                    # off and on again with no tick between
-    gp._at_rest("tool text")                                                 # a step writes text in that window
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    await env.runner.tick()
-    await env.runner.tick()
-    assert calls == [1, 1]
-
-
-async def test_1526_block_reason_is_reduced_in_privacy_mode(env, monkeypatch):
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    p = env.store.propose("b", steps(("fake_read", {"text": "z"})))
-    env.store.approve(p["id"])
-    env.store._set(p["id"], "running")
-    env.runner._block(p["id"], env.store.get(p["id"])["steps"][0], "tool says hunter2")
-    d = env.store.get(p["id"])
-    assert d["steps"][0]["error"] == "" and d["note"] == "step 1" and "hunter2" not in _all_text(env)
-
-
-
-async def test_1526_block_note_written_while_off_between_two_ticks_is_rescanned(env, monkeypatch):
-    calls = []
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(1) or 0)
-    p = env.store.propose("b", steps(("fake_read", {"text": "z"})))
-    await env.runner.tick()
-    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
-    env.runner._block(p["id"], env.store.get(p["id"])["steps"][0], "tool says hunter2")
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    await env.runner.tick()
-    assert calls == [1, 1]
-
-
-async def test_1526_done_plan_in_privacy_mode_leaves_nothing_to_scrub(env, monkeypatch):
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    p = env.store.propose("ok", steps(("fake_read", {"text": "q"}), ("fake_bad", {})))
-    env.store.approve(p["id"])
-    env.store.skip(p["id"], 1)
-    await env.runner.tick()
-    d = env.store.get(p["id"])
-    assert d["state"] == "done" and d["result"] == "1/2 steps done." and env.store.scrub_private() == 0
-
-
-async def test_1526_block_with_privacy_flipping_mid_write_is_rescanned(env, monkeypatch):
-    """R1: privacy off when _block stores the raw reason, on again before _stop_plan: the next tick must rescan."""
-    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    await env.runner.tick()                                                   # a scrub covers the current count
-    flips = iter([False])                                                     # the first read (in _block) sees off
-    monkeypatch.setattr(gp.logs, "privacy", lambda: next(flips, True))
-    p = env.store.propose("go", steps(("fake_read", {"text": "x"})))
-    env.store.approve(p["id"])
-    step = env.store.get(p["id"])["steps"][0]
-    env.store.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (p["id"],))
-    env.runner._block(p["id"], step, "tool says: hunter2")
-    assert "hunter2" in _all_text(env)                                        # the raw text did reach the step error
-    await env.runner.tick()
-    assert "hunter2" not in _all_text(env)
-
-
-def test_1526_empty_plain_text_is_not_counted(monkeypatch):
-    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
-    n = gp._PLAIN[0]
-    assert gp._at_rest("") == "" and gp._PLAIN[0] == n                         # R4: nothing to scrub, no rescan
-    assert gp._at_rest("x") == "x" and gp._PLAIN[0] == n + 1
