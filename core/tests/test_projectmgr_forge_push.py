@@ -213,9 +213,53 @@ def test_shared_config_keys_reports_local_and_included_keys_only(tmp_path, _owne
 
 def test_status_reports_a_git_older_than_2_31(monkeypatch, tmp_path):
     """#1722 R6: the project's GitHub status names the git 2.31 prerequisite instead of raising GitError."""
-    def run(argv, **kw):
+    def run(argv):
         return subprocess.CompletedProcess(argv, 0, "git version 2.30.2\n", "")
     monkeypatch.setattr(gitops, "_GIT_OK", [])
-    monkeypatch.setattr(gitops.subprocess, "run", run)
+    monkeypatch.setattr(gitops, "_run", lambda cwd, *argv: run(["git", *argv]))   # round-4 R4: only the version probe
     st = forge.status(str(tmp_path))
     assert st["git"] is False and "2.31 or later" in st["git_error"] and st["repo"] == ""
+
+
+@pytest.mark.parametrize("where", ["dot-git-hooks", "shared-hookspath"])
+def test_no_reference_transaction_hook_runs_on_the_push(tmp_path, _owner_home, where):
+    """Round-4 review R1: the push and the tracking-ref update write refs, which runs `reference-transaction` (git
+    2.28+). Neither `.git/hooks/` nor a shared `core.hooksPath` runs: gitops.git pins core.hooksPath to NO_HOOKS."""
+    sc, marker = _script(tmp_path)
+    _local_github(tmp_path, _owner_home)
+    repo = _repo(tmp_path, "https://github.com/o/r.git")
+    hooks = repo / ".git" / "hooks" if where == "dot-git-hooks" else tmp_path / "shared-hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    for name in ("reference-transaction", "pre-push", "post-update"):
+        (hooks / name).write_text(sc.read_text(encoding="utf-8").replace("exit 1", "exit 0"), encoding="utf-8")
+        (hooks / name).chmod(0o755)
+    if where == "shared-hookspath":
+        _cfg(repo, "core.hooksPath", str(hooks))
+    neg = subprocess.run(["git", "update-ref", "refs/x", "HEAD"], cwd=repo, capture_output=True, text=True)
+    assert neg.returncode == 0 and marker.exists()                       # negative control: plain git runs the hook
+    marker.unlink()
+    forge.push_branch(str(repo), BRANCH)
+    assert not marker.exists()
+    head = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
+    assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == head
+
+
+def test_a_failed_tracking_ref_update_after_the_push_does_not_fail_it(tmp_path, _owner_home, caplog):
+    """Round-4 review R3: the branch is already on GitHub, so a failing local update-ref is logged, not raised."""
+    bare = _local_github(tmp_path, _owner_home)
+    repo = _repo(tmp_path, "https://github.com/o/r.git")
+    lock = repo / ".git" / "refs" / "remotes" / "origin" / f"{BRANCH}.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text("", encoding="utf-8")
+    forge.push_branch(str(repo), BRANCH)
+    assert BRANCH in subprocess.run(["git", "--git-dir", str(bare), "branch", "--list", BRANCH],
+                                    capture_output=True, text=True).stdout
+    assert "tracking ref" in caplog.text
+
+
+def test_a_remote_with_a_dot_in_its_name_is_named_in_the_refusal(tmp_path, _owner_home):
+    """Round-4 review R2: an unrelated remote named my.fork is refused (fail closed); the message says why."""
+    repo = _repo(tmp_path, "https://github.com/o/r.git")
+    _cfg(repo, "remote.my.fork.url", "https://github.com/me/r.git")
+    with pytest.raises(forge.ForgeError, match="dot in its name"):
+        forge.push_branch(str(repo), BRANCH)

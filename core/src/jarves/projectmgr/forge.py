@@ -3,6 +3,7 @@ owner's own login (JARVES stores no token). Never force-pushes, never merges on 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -10,6 +11,7 @@ import subprocess
 
 from . import gitops
 
+_log = logging.getLogger(__name__)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
@@ -86,6 +88,7 @@ _PUSH_KEY = re.compile(r"^(?:url\..*\.(?:insteadof|pushinsteadof)|remote\..*\.(?
                        r"|extraheader|cookiefile)"
                        r"|core\.(?:sshcommand|askpass|gitproxy|alternaterefscommand)|credential\.(?:.*\.)?helper"
                        r"|gpg\.(?:.*\.)?program|hook\..*\.command)$", re.S | re.I)
+_DOTTED_REMOTE = re.compile(r"^remote\.(?![\w-]+\.[^.]+\Z)(?!.*\.(?:receivepack|uploadpack|vcs|proxy)\Z)", re.S | re.I)
 
 
 def _push_url(path: str) -> str:
@@ -95,6 +98,10 @@ def _push_url(path: str) -> str:
     except gitops.GitError as e:
         raise ForgeError(str(e)) from e
     bad = sorted({k for k in keys if _PUSH_KEY.match(k)})
+    if bad and _DOTTED_REMOTE.match(bad[0]):                    # fail closed: `git push <url>` may read it as a name
+        raise ForgeError(f"JARVES will not push: the repository's own git config sets {bad[0]!r}, a remote with a dot "
+                         "in its name (or a URL-shaped one), which a push could mistake for the push URL (rename that "
+                         "remote with git remote rename, or remove it)"[:300])
     if bad:
         raise ForgeError(f"JARVES will not push: the repository's own git config sets {bad[0]!r}, which could run a "
                          "command or send your credential elsewhere (move it to your global config, or remove it with git config --local --unset)"[:300])
@@ -108,14 +115,18 @@ def push_branch(path: str, branch: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch). Pushes to the
     vetted URL itself, so `remote.origin.*` (pushurl, receivepack, vcs) is never read; unsigned; never into a
     submodule, whose own config JARVES does not read (#1722). Afterwards refs/remotes/origin/<branch> is set to the
-    pushed commit, as a push to `origin` would."""
+    pushed commit, as a push to `origin` would; best effort, as the branch is already pushed (a failure is logged).
+    No hook runs on either (`reference-transaction` included): gitops.git pins core.hooksPath to NO_HOOKS."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
     url = _push_url(path)
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
     gitops.git(path, "push", "--no-verify", "--no-signed", "--recurse-submodules=no", url,
                f"{sha}:refs/heads/{branch}", timeout=300, ident=False)
-    gitops.git(path, "update-ref", f"refs/remotes/origin/{branch}", sha)
+    try:
+        gitops.git(path, "update-ref", f"refs/remotes/origin/{branch}", sha)
+    except gitops.GitError as e:
+        _log.warning("pushed %s, but the local tracking ref origin/%s was not updated: %s", branch, branch, e)
 
 
 def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:
