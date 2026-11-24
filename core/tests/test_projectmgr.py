@@ -593,6 +593,32 @@ def test_ship_apply_merges_into_owner_branch_after_approval(env):
     assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
+def test_ship_approval_names_the_commit_and_merges_only_that_commit(env):
+    """#1407: the ship prompt named the integration branch, a ref any agent with the shared repo can move; a commit
+    added while the owner reads the prompt was merged too. The prompt, the commands and the merge use one commit."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = home / "projects" / "1" / "integration"
+    tip = sh(integ, "git", "rev-parse", "HEAD").strip()
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == tip and all(tip in c for c in plan["commands"][:2])
+    seen = []
+
+    def ask(prompt, **kw):                      # an agent moves the branch while the owner reads the prompt
+        seen.append((prompt, kw["details"]))
+        (integ / "late.txt").write_text("late\n")
+        sh(integ, "git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
+        sh(integ, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "late", "--no-verify")
+        return True
+    m._ask = ask
+    assert m.call("ship_plan", project="demo", apply=True)["ok"]
+    assert tip[:12] in seen[0][0] and seen[0][1]["commit"] == tip[:12]
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)

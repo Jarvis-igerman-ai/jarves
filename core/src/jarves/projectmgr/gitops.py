@@ -69,6 +69,46 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+def _run(cwd: str | Path, argv: list[str], timeout: float) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+                          creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                          errors="replace")
+
+
+# programs the config can name for signing: a repository-scope value is replaced by the owner's global/system one
+_PROGRAMS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+             "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
+
+
+def config_overrides(listing: str) -> list[str]:
+    """`-c` values that switch off every command a repository-scope config names (#1407). `listing` is
+    `git config --show-scope --null --list`. Repository scope (`.git/config`, `config.worktree` and files they
+    include) is writable by agents; the owner's global and system settings (git-lfs filters, their gpg) are kept.
+    A filter loses its commands (content is stored as is), a merge driver becomes a plain conflict, a config hook
+    (`hook.<name>.command`, newer git than CI's 2.43: UNVERIFIED there) runs `true`."""
+    items, trusted, local = listing.split("\0"), {}, []
+    for scope, entry in zip(items[0::2], items[1::2]):
+        key, _, val = entry.partition("\n")
+        if scope in ("global", "system"):
+            trusted[key] = val
+        else:
+            local.append(key)
+    out: list[str] = []
+    for key in local:
+        sec, _, rest = key.partition(".")
+        name = rest.rpartition(".")[0]
+        if sec == "filter" and name:
+            out += [f"filter.{name}.clean=", f"filter.{name}.smudge=", f"filter.{name}.process=",
+                    f"filter.{name}.required=false"]
+        elif sec == "merge" and name:
+            out.append(f"merge.{name}.driver=")
+        elif sec == "hook" and name:
+            out.append(f"hook.{name}.command=true")
+        elif key in _PROGRAMS:
+            out.append(f"{key}={trusted.get(key, _PROGRAMS[key])}")
+    return list(dict.fromkeys(out))
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
@@ -76,16 +116,20 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
+    JARVES merges into the owner's branch. Commands the repository-scope config names (filter and merge drivers, gpg
+    programs, config hooks) are overridden per call (#1407, `config_overrides`); diff/log/show run no external diff
+    or textconv. Open: the config is read just before the command, so a write in between is not covered (#1533)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
-    for attempt in range(LOCK_RETRIES + 1):
-        p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
-        if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
-            break
-        time.sleep(0.15 * (attempt + 1))
+    p = _run(cwd, [*pre, "config", "--show-scope", "--null", "--list"], timeout)
+    if p.returncode == 0:                    # a config git cannot read fails the command too: report that failure
+        pre += [x for o in config_overrides(p.stdout) for x in ("-c", o)]
+        if args and args[0] in ("diff", "log", "show"):
+            args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])
+        for attempt in range(LOCK_RETRIES + 1):
+            p = _run(cwd, [*pre, *args], timeout)
+            if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
+                break
+            time.sleep(0.15 * (attempt + 1))
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p

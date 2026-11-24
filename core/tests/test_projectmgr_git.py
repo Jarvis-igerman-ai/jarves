@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if "--show-scope" in argv:                     # the config read before each command (#1407)
+            return subprocess.CompletedProcess(argv, 0, "", "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -255,3 +257,57 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+def _driver_repo(tmp_path: Path, marker: Path) -> Path:
+    """#1407: what an agent that can write `.gitattributes` and the shared `.git/config` sets: a filter, a merge
+    driver, a diff textconv/external command and a gpg program, each of which writes the marker when git runs it."""
+    repo = _repo(tmp_path)
+    gitops.git(repo, "config", "user.name", "Owner")
+    gitops.git(repo, "config", "user.email", "owner@example.invalid")
+    (repo / ".gitattributes").write_text("*.txt filter=evil merge=evil diff=evil\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
+    run = f"echo ran >> '{marker.as_posix()}'"
+    for key, val in (("filter.evil.clean", f"{run}; cat"), ("filter.evil.smudge", f"{run}; cat"),
+                     ("filter.evil.process", run), ("filter.evil.required", "true"),
+                     ("merge.evil.driver", f"{run}; false"), ("diff.evil.textconv", f"{run}; cat"),
+                     ("diff.evil.command", run), ("gpg.program", (tmp_path / "evil-gpg").as_posix())):
+        subprocess.run(["git", "config", key, val], cwd=repo, check=True)
+    _hook(tmp_path, "evil-gpg", marker)
+    return repo
+
+
+def test_drivers_and_programs_named_by_the_shared_config_never_run(tmp_path):
+    """#1407 item 3: worktree add (smudge), add/commit (clean), diff for the reviewer (textconv, external diff), a
+    conflicting merge (merge driver) and the signed ship merge (gpg.program) run none of the repository's commands."""
+    marker, home = tmp_path / "ran.txt", tmp_path / "home"
+    repo = _driver_repo(tmp_path, marker)
+    subprocess.run(["git", "diff", "HEAD~1"], cwd=repo, capture_output=True)        # the setup itself works
+    assert marker.exists()
+    marker.unlink()
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    (wt / "f.txt").write_text("task\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "t") and gitops.changed_files(wt, "main") == ["f.txt"]
+    assert "task" in gitops.git(wt, "diff", "main...HEAD").stdout and gitops.diffstat(wt, "main") != "no changes"
+    (repo / "f.txt").write_text("owner\n", encoding="utf-8")
+    gitops.git(repo, "commit", "-qam", "owner", "--no-verify")
+    assert gitops.merge_in(repo, "jarves/p1/t1-a1") == ["f.txt"]                   # a plain conflict, aborted
+    subprocess.run(["git", "config", "commit.gpgsign", "true"], cwd=repo, check=True)
+    gitops.merge_in(repo, "jarves/p1/integration", ident=False)                   # signing may fail; never runs
+    assert not marker.exists()
+
+
+def test_owner_global_filters_are_kept_and_repo_scope_commands_are_overridden(tmp_path, monkeypatch):
+    """#1407: only repository-scope keys are switched off; the owner's global settings (git-lfs filters) stay. A
+    config-defined hook (`hook.<name>.command`, newer git than CI's) is replaced by `true`."""
+    listing = "\0".join(["global", "filter.lfs.clean\ngit-lfs clean -- %f", "global", "gpg.program\n/usr/bin/gpg2",
+                         "local", "filter.ev.il.clean\nx", "local", "merge.evil.driver\nx", "local", "merge.ff\nfalse",
+                         "worktree", "hook.pwn.command\nx", "local", "gpg.program\nx", "local",
+                         "gpg.ssh.defaultkeycommand\nx", "local", "user.name\nA", ""])
+    out = gitops.config_overrides(listing)
+    assert "filter.ev.il.clean=" in out and "filter.ev.il.process=" in out and "filter.ev.il.required=false" in out
+    assert "merge.evil.driver=" in out and "hook.pwn.command=true" in out
+    assert "gpg.program=/usr/bin/gpg2" in out and "gpg.ssh.defaultkeycommand=" in out
+    assert not [o for o in out if "lfs" in o or o.startswith(("merge.ff", "user."))]
