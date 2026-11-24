@@ -517,6 +517,7 @@ class SkillRegistry:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
         if tool.approval_meta is not None and prompt:
             try:
+                # the SAME args instance then goes to the handler: pref_confirm binds the shown wording on it (#1514)
                 extra = tool.approval_meta(args) or {}
             except Exception:
                 extra = {}

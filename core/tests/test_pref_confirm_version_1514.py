@@ -128,3 +128,15 @@ async def test_a_max_length_preference_confirms_on_dashboard_and_voice(home):
     assert p.get(pid)["state"] == "proposed"
     r = await _registry(p, lambda meta: True).call("pref_confirm", {"id": pid}, origin="model")
     assert r.ok and p.get(pid)["state"] == "confirmed"
+
+
+def test_dashboard_confirm_errors_reach_the_owner_in_hebrew(home):
+    """Review R2: pillars.js shows JL.t(error); both new confirm errors have a Hebrew catalog text."""
+    from jarves import locale_parts
+    pid = _proposed(home)
+    ctx = dashboard.Ctx(home, Config())
+    errors = [prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid})[1]["error"]]
+    prefs_mod._ctx(ctx).edit(pid, B, by="phone", repropose=True)
+    errors.append(prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": A})[1]["error"])
+    he = locale_parts.catalog("he")["dict"]
+    assert all(he.get(e) and he[e] != e for e in errors), errors
