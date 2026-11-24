@@ -1272,6 +1272,8 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
         assert url.endswith("/pull/9")
         checks = forge.pr_checks("o/r", "9")
         assert checks and checks[0]["bucket"] == "pass"
+        with pytest.raises(forge.ForgeError, match="no GitHub repository is recorded"):
+            forge.gh("", "issue", "list")                            # #1622: only auth status may omit --repo
         for bad in ("", "o", "o/r/x", "../r", "o/..", "o r/x", "--repo=x/y", "-x/y", "o/-r", "o/.r"):
             with pytest.raises(forge.ForgeError, match="no GitHub repository is recorded"):
                 forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
@@ -1291,6 +1293,9 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     r = m.call("configure", project="demo", github="write")
     assert r["ok"] and r["project"]["github"] == "write" and r["project"]["github_repo"] == "o/r"
     assert "will only use o/r" in r["text"]                          # the owner sees the pinned target (#1622)
+    sh(repo, "git", "config", "url.https://github.com/evil/.insteadOf", "https://github.com/o/")   # pre-planted
+    r = m.call("configure", project="demo", github="write")
+    assert r["project"]["github_repo"] == "o/r"                      # #1622: the raw origin URL, as push_branch reads
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"

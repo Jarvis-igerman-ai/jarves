@@ -32,7 +32,7 @@ def gh_cmd() -> list[str]:
 def repo_slug(path: str) -> str:
     """owner/repo of the project's `origin` remote on github.com, or ''. Read only when the owner sets the GitHub mode
     on the PC: stored as the project's `github_repo`, the only target of gh() and push_branch() (#1622)."""
-    url = gitops.git(path, "remote", "get-url", "origin", check=False).stdout.strip()
+    url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()   # raw, as push_branch
     m = _SLUG.search(url)
     return f"{m.group(1)}/{m.group(2)}" if m else ""
 
@@ -62,15 +62,17 @@ def gh_env(box: str) -> dict[str, str]:
     return env
 
 
-def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120) -> str:
+def gh(repo: str, *args: str, input_: str | None = None, timeout: float = 120, no_repo: bool = False) -> str:
     """Run gh for `repo` (the recorded owner/repo; '' only for `auth status`, which names no repository). gh never runs
-    inside the project (#1622): it runs in a fresh empty folder (gh_env) and its target is the explicit `--repo=`."""
+    inside the project (#1622): it runs in a fresh empty folder (gh_env) and its target is the explicit `--repo=`.
+    no_repo=True only for `auth status`; any other call with no valid record is refused."""
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
+    target = [] if no_repo else [f"--repo={_need(repo)}"]
     box = tempfile.mkdtemp(prefix="jarves-gh-")
     try:
-        p = subprocess.run([*cmd, *args, *([f"--repo={_need(repo)}"] if repo else [])], cwd=box, capture_output=True,
+        p = subprocess.run([*cmd, *args, *target], cwd=box, capture_output=True,
                            text=True, timeout=timeout, env=gh_env(box), creationflags=_NOWIN, input=input_,
                            encoding="utf-8", errors="replace")
     finally:   # best effort: on Windows gh may still hold the folder; that must not lose a created PR's URL
@@ -92,7 +94,7 @@ def status(path: str, repo: str = "") -> dict:
            "origin": repo_slug(path)}
     if out["gh"]:
         try:
-            gh("", "auth", "status")
+            gh("", "auth", "status", no_repo=True)
             out["signed_in"] = True
         except (ForgeError, OSError, subprocess.SubprocessError):
             pass
@@ -131,9 +133,9 @@ def push_branch(path: str, branch: str, repo: str) -> None:
     url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
     if not _PUSH_URL.match(url):
         raise ForgeError(f"JARVES pushes only to a github.com origin: {PUSH_URL_FORMS}")
-    m = _SLUG.search(url.lower())
-    if not m or f"{m.group(1)}/{m.group(2)}" != _need(repo).lower():
-        raise ForgeError(f"origin no longer points at the recorded repository {repo}: JARVES does not push there")
+    rec, m = _need(repo), _SLUG.search(url.lower())
+    if not m or f"{m.group(1)}/{m.group(2)}" != rec.lower():
+        raise ForgeError(f"origin no longer points at the recorded repository {rec}: JARVES does not push there")
     if gitops.git(path, "rev-parse", "--is-shallow-repository").stdout.strip() == "true":   # alternates lack it
         raise ForgeError("JARVES cannot push from a shallow clone: run git fetch --unshallow in the project first")
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()

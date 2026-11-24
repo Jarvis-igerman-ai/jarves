@@ -156,7 +156,7 @@ def test_status_reports_a_git_older_than_2_31(monkeypatch, tmp_path):
         raise gitops.GitError("JARVES needs git 2.31 or later (found: 2.30)")
     monkeypatch.setattr(gitops, "require_git", old_git)
     st = forge.status(str(tmp_path), "o/r")
-    assert st["git"] is False and "2.31 or later" in st["git_error"] and st["repo"] == "o/r"   # #1746 R4: kept
+    assert st["git"] is False and "2.31 or later" in st["git_error"] and st["repo"] == "o/r"   # #1622: recorded repo kept
 
 
 def test_a_failed_temp_cleanup_does_not_fail_the_push(tmp_path, home, monkeypatch, caplog):
