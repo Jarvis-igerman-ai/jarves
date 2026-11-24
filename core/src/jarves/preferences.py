@@ -381,7 +381,9 @@ def make_skill(prefs: Preferences):
                 if not r:
                     return {}
                 a._shown = str(r["text"])[:MAX_TEXT]    # #1514: the confirm below applies only to these words
-                return {"details": {"preference": a._shown}}
+                # the prompt carries them too: a confirm callback without `accepts_meta` shows only the prompt
+                return {"details": {"preference": a._shown},
+                        "prompt": f'לזכור את ההעדפה "{a._shown}"? / Remember this preference: "{a._shown}"?'}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
@@ -446,7 +448,10 @@ def api_pref_op(ctx, m, body):
             seen = b.get("text")              # #1514: confirm only the words the page showed
             if not isinstance(seen, str) or not seen.strip():
                 return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
-            return 200, p.confirm(pid, by="dashboard", expect=seen[:MAX_TEXT])   # same cut as the voice path
+            try:
+                return 200, p.confirm(pid, by="dashboard", expect=seen[:MAX_TEXT])   # same cut as the voice path
+            except KeyError:                  # removed after the check above
+                return 404, {"error": "no such preference"}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":
@@ -457,8 +462,6 @@ def api_pref_op(ctx, m, body):
             return 200, {"ok": p.remove(pid, by="dashboard")}
     except ValueError as e:
         return 400, {"error": str(e)}
-    except KeyError:
-        return 404, {"error": "no such preference"}
     except PrefConflict:                      # #1514: the wording changed after the page showed it; nothing written
         return 409, {"error": "the preference changed meanwhile: reload the page", "code": "PREF_CONFLICT"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}

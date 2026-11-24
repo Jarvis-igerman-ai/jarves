@@ -194,7 +194,8 @@ class Tool:
     # extra approval metadata (SW-V4 F): (validated args) -> {"details": {...}, "typed": bool, "voice": bool} merged
     # into the approvals request (a WhatsApp send shows name + number + full text; typed at night). It may bind state
     # onto args (#1514: pref_confirm records the words shown): the registry runs it once per call, on the same args
-    # object the handler then gets, right before the ask, whether or not the confirm callback `accepts_meta`.
+    # object the handler then gets, right before the ask, whether or not the confirm callback `accepts_meta`. A
+    # non-empty "prompt" in its result replaces the tool's confirm prompt (it never adds or removes an ask).
     approval_meta: Callable[[Any], dict] | None = None
     # (validated args) -> a refusal, or None: runs BEFORE the owner is asked, so an impossible call is never put to
     # the owner as a question (V4-WA-2: unknown/used WhatsApp draft id)
@@ -526,6 +527,8 @@ class SkillRegistry:
             for k in ("typed", "voice", "why"):
                 if k in extra:
                     meta[k] = extra[k]
+            if isinstance(extra.get("prompt"), str) and extra["prompt"].strip():
+                prompt = extra["prompt"]      # #1514: a plain confirm(prompt) gets only this, so it carries the details
         if prompt and not await self._ask(prompt, **meta):
             return self._not_approved(tool.name, origin)
         return None

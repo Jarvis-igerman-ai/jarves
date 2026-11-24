@@ -61,7 +61,7 @@ def test_dashboard_confirm_of_an_item_removed_mid_request_is_not_found(dash, mon
 def _voice(p, during_ask=None, accepts_meta=True):
     reg, asked = SkillRegistry(), []
     async def confirm(prompt, **meta):
-        asked.append(meta)
+        asked.append({**meta, "prompt": prompt})
         if during_ask:
             during_ask()                                       # the edit lands while the owner reads the popup
         return True
@@ -86,17 +86,19 @@ async def test_voice_confirm_applies_only_to_the_wording_the_approval_showed(hom
     assert r.ok and asked[0]["details"]["preference"] == B and p.get(pid)["state"] == "confirmed"
 
 
-async def test_voice_confirm_works_through_a_plain_confirm_callback(home):
-    """Review R2: a confirm callback without `accepts_meta` (a plain confirm(prompt)) still gets approval_meta run,
-    so a voice yes is not silently turned into PREF_NOT_SHOWN; the edit race is still refused there."""
+async def test_voice_confirm_through_a_plain_confirm_callback_shows_the_exact_wording(home):
+    """Review (gpt blocker): a confirm callback without `accepts_meta` gets only the prompt, so the prompt itself must
+    carry the exact words being confirmed; the edit race is still refused, and a normal yes confirms what was asked."""
     p = prefs_mod.Preferences(open_db(home))
     pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
-    reg, _ = _voice(p, lambda: p.edit(pid, B, by="phone", repropose=True), accepts_meta=False)
+    reg, asked = _voice(p, lambda: p.edit(pid, B, by="phone", repropose=True), accepts_meta=False)
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert asked == [{"prompt": asked[0]["prompt"]}] and f'"{A}"' in asked[0]["prompt"]   # only the prompt arrived
     assert (r.ok, r.code, p.get(pid)["state"]) == (False, "PREF_CONFLICT", "proposed")
-    reg, _ = _voice(p, accepts_meta=False)
+    reg, asked = _voice(p, accepts_meta=False)
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
-    assert r.ok and p.get(pid)["state"] == "confirmed"
+    assert f'"{B}"' in asked[0]["prompt"] and A not in asked[0]["prompt"]
+    assert r.ok and p.get(pid)["state"] == "confirmed" and p.get(pid)["text"] == B
 
 
 async def test_voice_confirm_that_was_never_shown_the_wording_confirms_nothing(home):

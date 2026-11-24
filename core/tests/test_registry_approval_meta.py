@@ -52,3 +52,32 @@ async def test_approval_meta_runs_once_on_the_handlers_args_before_the_ask(accep
         assert r.ok and seen[2][1] is seen[0][1] and seen[2][1]._bound == "shown words"
     else:
         assert not r.ok
+
+
+@pytest.mark.parametrize("given,expected", [("Approve 'shown words'?", "Approve 'shown words'?"), ("", "Approve?"),
+                                            ("  ", "Approve?"), (7, "Approve?"), (None, "Approve?")])
+async def test_approval_meta_prompt_replaces_the_confirm_prompt_only_when_it_is_text(given, expected):
+    """#1514: a plain confirm(prompt) callback sees only the prompt, so approval_meta may put the details in it."""
+    asked = []
+
+    async def handle(_a):
+        return ToolResult(True, "done")
+
+    tool = Tool("test_prompt", "Test approval prompt", handle, args=Args, permission="action", confirm="Approve?",
+                approval_meta=lambda a: {"prompt": given})
+
+    class TestSkill(Skill):
+        name = "test_prompt_skill"
+
+        def tools(self):
+            return [tool]
+
+    reg = SkillRegistry(allowed_actions={tool.name})
+    reg.register(TestSkill())
+
+    async def confirm(prompt):
+        asked.append(prompt)
+        return True
+
+    reg.confirm = confirm
+    assert (await reg.call("test_prompt", {"value": 1})).ok and asked == [expected]
