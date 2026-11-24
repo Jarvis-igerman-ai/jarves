@@ -661,7 +661,8 @@ class StageEngine:
         try:
             wt = gitops.detached_worktree(self.home, p["path"], p["id"], sha)
             try:
-                ok, out = gitops.run_check(wt, argv, timeout=3600, env_keep=list(self.cfg.release_env))
+                ok, out = gitops.run_check(wt, argv, timeout=3600, env_keep=list(self.cfg.release_env),
+                                                git_writes=True)
             finally:
                 gitops.remove_worktree(p["path"], wt)
         finally:

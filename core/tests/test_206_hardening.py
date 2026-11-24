@@ -208,6 +208,7 @@ def test_h4_guide_claim_check_runs_with_an_allow_listed_env_and_a_time_limit(tmp
         seen.update(kw)
         raise subprocess.TimeoutExpired(argv, kw["timeout"])
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
+    monkeypatch.setattr(gitops, "_CONFINE", {"ok": False})             # only the check's own run is faked here
     monkeypatch.setattr(gitops.subprocess, "run", fake_run)
     assert gitops.run_check(tmp_path, ["check"], timeout=7) == (False, "check timed out")
     assert seen["timeout"] == 7 and "OPENAI_API_KEY" not in seen["env"] and seen.get("shell") is not True

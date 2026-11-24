@@ -126,7 +126,7 @@ def test_a_confinement_that_cannot_be_set_up_never_runs_the_command(tmp_path):
     marker = tmp_path / "ran"
     bad = {"tree": str(tmp_path / "missing"), "ro": [], "rw": [], "mask": []}
     p = subprocess.run(confine.wrap([sys.executable, "-c", f"open({str(marker)!r},'w')"], bad),
-                       capture_output=True, text=True, timeout=30)
+                       capture_output=True, text=True, timeout=30, check=False)
     assert p.returncode == confine.FAIL and "could not confine" in p.stderr and not marker.exists()
 
 
@@ -151,3 +151,27 @@ def test_the_spec_lists_every_worktree_pointer_and_only_this_worktrees_metadata_
     assert str(common / "worktrees" / "t1-a1") in s["rw"] and str(common / "worktrees" / "integration") not in s["rw"]
     assert str(common / "worktrees" / "t1-a1" / "gitdir") in s["ro"]
     assert confine.spec(common, common / "worktrees" / "t1-a1", wt, git_writes=False)["rw"] == []
+
+
+@pytest.mark.linux_only
+def test_the_release_command_can_still_tag_but_not_change_the_config(tmp_path):
+    repo, integ, wt = _project(tmp_path)
+    tag = ("import subprocess; subprocess.run(['git', 'tag', 'v1'], check=True); "
+           "open(subprocess.check_output(['git', 'rev-parse', '--git-common-dir'], text=True).strip() + '/config', 'a')")
+    ok, out = gitops.run_check(integ, [sys.executable, "-c", tag], git_writes=True)
+    assert not ok and "Read-only file system" in out
+    assert gitops.git(repo, "tag", "--list").stdout.strip() == "v1"
+
+
+@pytest.mark.linux_only
+def test_a_check_that_cannot_be_confined_is_never_run_unconfined(monkeypatch, tmp_path):
+    repo, integ, wt = _project(tmp_path)
+    monkeypatch.setattr(gitops, "_CONFINE", {"ok": True})
+
+    def broken(*a, **k):
+        raise OSError("unreadable gitdir file")
+    monkeypatch.setattr(confine, "spec", broken)
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", "open('ran.txt', 'w')"])
+    assert (ok, out) == (False, "check could not be confined: unreadable gitdir file") and not (wt / "ran.txt").exists()
+    r = _Script("open('ran.txt', 'w')", []).run("p", str(wt), check_argv=["python"], timeout=30)
+    assert "unreadable gitdir file" in r.error and not (wt / "ran.txt").exists()

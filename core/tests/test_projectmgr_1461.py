@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from test_projectmgr import env, finish, open_project, sh, task  # noqa: F401  (fixture + helpers)
 
 from jarves.projectmgr import engine, gitops
@@ -12,6 +13,12 @@ from jarves.projectmgr import engine, gitops
 GIT = ("git", "-c", "user.name=s", "-c", "user.email=s@s")
 COMMIT_EVIL = ("import subprocess as s; open('a.txt','w').write('evil'); "
                f"s.run({list(GIT)!r} + ['commit', '-qam', 'evil', '--no-verify'], check=True)")
+
+
+@pytest.fixture(autouse=True)
+def _unconfined(monkeypatch):
+    """These checks commit, which the Linux confinement (#1592) refuses; the #1461 defence is for where it is off."""
+    monkeypatch.setattr(gitops, "_CONFINE", {"ok": False})
 
 
 def _sibling_commit(wt) -> None:

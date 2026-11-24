@@ -8,7 +8,8 @@ the run ends, and the mounts are locked for nested namespaces (no umount, no non
 `/run/user/<uid>` is hidden (an empty tmpfs) so the systemd user manager / D-Bus cannot start a process outside it.
 
 Usable with git writes (`git_writes=True`, an agent's `git add`/`commit`): `objects/`, `refs/`, `logs/` and this
-worktree's own `worktrees/<name>/` stay writable, its `commondir`/`gitdir` stay read-only.
+worktree's own `worktrees/<name>/` stay writable, its `commondir`/`gitdir` stay read-only. So such a run can still move
+any branch or tag, and can add a `config.worktree` there (git reads it only if the owner set `extensions.worktreeConfig`).
 
 Honest limits: Linux only (Windows/macOS run as before, #1665); where user namespaces are off the command runs as
 before and JARVES logs that once. Other files the owner can write (`~/.gitconfig`, other repositories) are not

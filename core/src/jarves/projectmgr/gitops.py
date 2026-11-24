@@ -264,8 +264,9 @@ def confine_available() -> bool:
         why = "not Linux (tracked in #1665)"
         if sys.platform.startswith("linux"):
             try:
-                p = subprocess.run(confine.wrap(["true"], {"tree": os.path.dirname(confine.__file__), "ro": [], "rw": [], "mask": []}),
-                                   capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+                probe = {"tree": os.path.dirname(confine.__file__), "ro": [], "rw": [], "mask": []}
+                p = subprocess.run(confine.wrap(["true"], probe), capture_output=True, text=True, timeout=30,
+                                   stdin=subprocess.DEVNULL, check=False)
                 why = "" if p.returncode == 0 else (p.stderr.strip()[-200:] or f"exit {p.returncode}")
             except (OSError, subprocess.SubprocessError) as e:
                 why = str(e)
@@ -287,15 +288,21 @@ def confined(argv: list[str], wt: str | Path, git_writes: bool = False) -> list[
     return confine.wrap(argv, confine.spec(Path(dirs[0]), Path(dirs[1]), Path(wt), git_writes))
 
 
-def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
+def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None,
+              git_writes: bool = False) -> tuple[bool, str]:
     """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
     env_keep: extra variable names the owner allowed for this command (a release may need a token).
-    On Linux it runs `confined` (#1592): its code cannot write the shared `.git` config, hooks or worktree pointers."""
+    On Linux it runs `confined` (#1592): its code cannot write the shared `.git` config, hooks or worktree pointers;
+    git_writes (the release command, which may tag): objects and refs stay writable."""
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
-        p = subprocess.run(confined(argv, wt), cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
+        cmd = confined(argv, wt, git_writes)
+    except (OSError, subprocess.SubprocessError) as e:        # never run it unconfined where confinement is on
+        return False, f"check could not be confined: {e}"
+    try:
+        p = subprocess.run(cmd, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
                            env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return False, "check timed out"

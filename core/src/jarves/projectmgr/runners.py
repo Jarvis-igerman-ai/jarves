@@ -109,7 +109,7 @@ class Runner:
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
                                  creationflags=_NOWIN, encoding="utf-8", errors="replace",
                                  start_new_session=(os.name != "nt"))
-        except OSError as e:
+        except (OSError, subprocess.SubprocessError) as e:
             return Result(error=f"could not start {self.name}: {e}")
         if on_start:
             on_start(p.pid)
