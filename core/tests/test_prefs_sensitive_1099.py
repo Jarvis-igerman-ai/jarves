@@ -48,6 +48,11 @@ KEYS = [
     "my secret is x9y8z7w6",
     # a SHA with six or more digits in a row is refused by the older long-number rule
     "revert 9fceb0212345678598e95dc970b74767f19372d61a",
+    # a bare base64 secret with "/" (the AWS documentation example secret access key)
+    "remember wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    # a bare "key"/"secret" plus colon with a value that has a digit or symbol
+    "wifi key: x9y8z7w6",
+    "my secret: x9y8z7w6",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -92,6 +97,10 @@ PLAIN = [
     # a sentence-ending word or a short number after is/was is still no value
     "the token is valid. see the docs",
     "the secret is safe with me",
+    # file paths and URL paths with "/" are not keys; "key:"/"secret:" with a plain word is not a value
+    "move core/src/jarves/preferences2026 to tests",
+    "see github.com/openai/openaiAgents2Python/releases",
+    "the secret: keep it short",
 ]
 
 

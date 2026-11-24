@@ -51,9 +51,11 @@ _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secr
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
     rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
+    # a bare "key"/"secret" right before a colon counts when the value has a digit or symbol ("wifi key: x9y8z7w6")
+    r"\b(?:keys?|secrets?)\s*:\s*(?=[^\s.,;!?]*[\d_+/=@#$%*&])\S{3,}|"
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword, a bare "key" included) the
     # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, or a bare number of 4+
-    # digits (a PIN), so state words such as "expired", "rotated" or "well-known" stay allowed. Review 5 R3: inner
+    # digits (a PIN), so state words such as "expired", "rotated" or "well-known" stay allowed. Inner
     # punctuation stays part of the value ("ab.cd12ef"); only a trailing . , ; ! ? ends it. A bare "secret" counts
     # here only (not before a colon), so a task such as "rotate the client secret next week" stays allowed.
     rf"(?:{_KEY_WORD}|\bkeys?\b|api[\s_-]*secret|\bsecrets?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
@@ -62,8 +64,12 @@ _KEY_VALUE = re.compile(
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys, and neither is a camelCase name built from
 # words of 2+ lowercase letters and short numbers (handleOAuth2Callback). Pure hex is judged by _hex_secret instead.
 # Long random IDs inside URLs (share links, capability tokens) are refused on purpose: they often grant access.
-# Review 5 R2: "=" splits segments (it is only base64 padding), so "sha=<git SHA>" is judged as the SHA alone.
+# "=" splits segments (it is only base64 padding), so "sha=<git SHA>" is judged as the SHA alone. Outside a URL a
+# run that also spans "/" is judged whole (base64 keys such as AWS secrets contain "/"), unless every "/" part of 8+
+# characters is a camelCase or lowercase word, as in file paths (core/src/jarves).
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9+]{20,}")
+_SLASH_RUN = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{20,}")   # whole runs only: linear
+_PATH_PART = re.compile(r"[a-z]+\d*")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
 _CAMEL_WORD = re.compile(r"[A-Z]{0,4}[a-z]{2,}")
@@ -74,7 +80,7 @@ def _entropy(s: str) -> float:
     return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
 
 
-# #1099 review R1: a hex secret (32+ hex chars, e.g. an MD5-style key) is refused unless it has a git SHA length
+# A hex secret (32+ hex chars, e.g. an MD5-style key) is refused unless it has a git SHA length
 # (40 or 64), and a SHA-length one is refused too when a key/secret word stands within the six words before it
 # (the same 0-5 words between as _KEY_VALUE) or within ~20 characters after it.
 _HEX_RUN = re.compile(r"(?<![A-Za-z0-9])[0-9a-fA-F]{32,}(?![A-Za-z0-9])")
@@ -85,9 +91,9 @@ HEX_ENTROPY_BITS = 3.0            # random hex of 32+ chars sits near 3.8; "aaaa
 
 
 def _camel(m: str) -> bool:
-    """A camelCase name: word chunks with at most one short number (review: AbcdEfgh12IjklMn34Opqr is a key), and
-    at least half the word chunks have a vowel after their first letter, as real words do; abbreviations such as
-    Http or Xml are the rest (review 5 R1: AbcdEfghIjklMnop1Qrst is a key)."""
+    """A camelCase name: word chunks with at most one short number (AbcdEfgh12IjklMn34Opqr is a key), and at least
+    half the word chunks have a vowel after their first letter, as real words do; abbreviations such as Http or Xml
+    are the rest (AbcdEfghIjklMnop1Qrst is a key)."""
     words = _CAMEL_WORD.findall(m)
     return (bool(_CAMEL.fullmatch(m)) and len(re.findall(r"\d+", m)) <= 1
             and 2 * sum(bool(re.search(r"[aeiouy]", w[1:])) for w in words) >= len(words))
@@ -98,16 +104,30 @@ def _hex_secret(text: str) -> bool:
         h = m.group()
         if not (re.search(r"[A-Fa-f]", h) and re.search(r"\d", h)) or _entropy(h) < HEX_ENTROPY_BITS:
             continue
-        near = " ".join(text[:m.start()].split()[-6:]) + " " + text[m.end():m.end() + 20]
+        near = " ".join(text[max(0, m.start() - 200):m.start()].split()[-6:]) + " " + text[m.end():m.end() + 20]
         if len(h) not in _SHA_LENGTHS or _HEX_WORD.search(near):
             return True
     return False
 
 
+def _segment_key(m: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _camel(m)
+                and _entropy(m) >= KEY_ENTROPY_BITS)
+
+
+def _slash_key(text: str) -> bool:
+    for m in _SLASH_RUN.finditer(text):
+        run, head = m.group(), text[max(0, m.start() - 200):m.start()].rsplit(None, 1)[-1:]
+        if "/" not in run or (head and "://" in head[0]):
+            continue
+        parts = [p for p in run.split("/") if len(p) >= 8]
+        if _segment_key(run.replace("/", "")) and not all(_camel(p) or _PATH_PART.fullmatch(p) for p in parts):
+            return True
+    return False
+
+
 def _keylike(text: str) -> bool:
-    return _hex_secret(text) or any(
-        re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _camel(m)
-        and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
+    return _hex_secret(text) or _slash_key(text) or any(_segment_key(m) for m in _KEY_SEGMENT.findall(text))
 
 
 # #1516: an unbroken base32 run (A-Z, 2-7; TOTP/2FA seeds) of 16+ chars. Refused when it has two or more separate
