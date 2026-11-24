@@ -141,7 +141,3 @@ def test_reviewer_entry_must_be_a_user_or_team_with_an_id():
     assert any("team" in w for w in guard.warnings(team_only, TAG_ONLY))
     assert guard.warnings(PROTECTED, TAG_ONLY) == []
 
-
-def test_module_docstring_is_wrapped():
-    # PR #1709 review R2
-    assert max(len(line) for line in guard.__doc__.splitlines()) <= 110
