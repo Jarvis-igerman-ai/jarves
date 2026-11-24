@@ -27,6 +27,8 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "quarantine: known flaky; runs in the separate non-blocking quarantine job")
     config.addinivalue_line("markers", "windows_only: runs only on Windows (deselected, not skipped, elsewhere)")
     config.addinivalue_line("markers", "linux_only: runs only on Linux (deselected, not skipped, elsewhere)")
+    config.addinivalue_line("markers", "userns: needs unprivileged user namespaces, which some hosts (Ubuntu 24.04 "
+                                       "AppArmor, the CI runners) block (#1592; deselected, not skipped, there)")
 
 
 # ---------------------------------------------------------------- CI sharding (no plugin, no reruns of the whole suite)
@@ -89,6 +91,11 @@ def pytest_itemcollected(item):
             item.add_marker(pytest.mark.quarantine(issue=_QUARANTINE[key]))
 
 
+def _userns() -> bool:
+    from jarves.projectmgr import gitops
+    return gitops.confine_available()
+
+
 def pytest_collection_modifyitems(config, items):
     import sys
     mode = config.getoption("--browser")
@@ -130,7 +137,8 @@ def pytest_collection_modifyitems(config, items):
     keep, drop = [], []
     for item in items:
         wrong = (item.get_closest_marker("windows_only") and sys.platform != "win32") or \
-                (item.get_closest_marker("linux_only") and not sys.platform.startswith("linux"))
+                (item.get_closest_marker("linux_only") and not sys.platform.startswith("linux")) or \
+                (item.get_closest_marker("userns") and not _userns())
         (drop if wrong else keep).append(item)
     if drop:
         config.hook.pytest_deselected(items=drop)

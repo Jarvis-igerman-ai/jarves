@@ -129,9 +129,9 @@ def _attack(repo: Path, integ: Path, wt: Path, sock: Path) -> list[str]:
 
 
 @pytest.mark.linux_only
+@pytest.mark.userns
 def test_a_check_cannot_change_any_shared_git_file_even_from_a_survivor(project):
     repo, integ, wt, sock = project
-    assert gitops.confine_available(), "user namespaces are needed for this test (#1592)"
     before = _state(repo, integ, wt, sock)
     ok, out = gitops.run_check(wt, _attack(repo, integ, wt, sock))
     assert ok and "denied" in out and "WROTE" not in out and "socket hidden" in out, out
@@ -144,6 +144,7 @@ def test_a_check_cannot_change_any_shared_git_file_even_from_a_survivor(project)
 
 
 @pytest.mark.linux_only
+@pytest.mark.userns
 def test_a_nested_namespace_cannot_undo_the_read_only_mounts(project):
     repo, integ, wt, sock = project
     before = _state(repo, integ, wt, sock)
@@ -153,6 +154,7 @@ def test_a_nested_namespace_cannot_undo_the_read_only_mounts(project):
 
 
 @pytest.mark.linux_only
+@pytest.mark.userns
 def test_a_check_has_no_network_but_a_loopback(project):
     repo, integ, wt, sock = project
     code = ("import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(); "
@@ -178,6 +180,7 @@ class _Script(runners.Runner):
 
 
 @pytest.mark.linux_only
+@pytest.mark.userns
 def test_an_agent_runs_the_check_only_through_the_confined_jarves_check_script(project):
     repo, integ, wt, sock = project
     before = _state(repo, integ, wt, sock)
@@ -200,6 +203,7 @@ def test_a_read_only_agent_gets_no_check_script(project):
 
 
 @pytest.mark.linux_only
+@pytest.mark.userns
 def test_the_release_command_can_still_tag_but_not_change_the_config(project):
     repo, integ, wt, sock = project
     tag = ("import subprocess; subprocess.run(['git', 'tag', 'v1'], check=True); "
