@@ -52,10 +52,10 @@ _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
     rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword, a bare "key" included) the
-    # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, so state words such as
-    # "expired", "rotated" or "well-known" stay allowed
+    # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, or a bare number of 4+
+    # digits (a PIN), so state words such as "expired", "rotated" or "well-known" stay allowed
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
-    r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}", re.I)
+    r"(?:(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}|\d{4,}(?![^\s.,;!?]))", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys, and neither is a camelCase name built from
 # words of 2+ lowercase letters and short numbers (handleOAuth2Callback). Pure hex is judged by _hex_secret instead.
@@ -71,7 +71,8 @@ def _entropy(s: str) -> float:
 
 
 # #1099 review R1: a hex secret (32+ hex chars, e.g. an MD5-style key) is refused unless it has a git SHA length
-# (40 or 64), and a SHA-length one is refused too when a key/secret word stands within ~20 characters of it.
+# (40 or 64), and a SHA-length one is refused too when a key/secret word stands within the six words before it
+# (the same 0-5 words between as _KEY_VALUE) or within ~20 characters after it.
 _HEX_RUN = re.compile(r"(?<![A-Za-z0-9])[0-9a-fA-F]{32,}(?![A-Za-z0-9])")
 _SHA_LENGTHS = (40, 64)
 _HEX_WORD = re.compile(rf"{_KEY_WORD}|\b(?:keys?|secrets?|passwords?)\b"
@@ -89,7 +90,7 @@ def _hex_secret(text: str) -> bool:
         h = m.group()
         if not (re.search(r"[A-Fa-f]", h) and re.search(r"\d", h)) or _entropy(h) < HEX_ENTROPY_BITS:
             continue
-        near = text[max(0, m.start() - 20):m.start()] + " " + text[m.end():m.end() + 20]
+        near = " ".join(text[:m.start()].split()[-6:]) + " " + text[m.end():m.end() + 20]
         if len(h) not in _SHA_LENGTHS or _HEX_WORD.search(near):
             return True
     return False

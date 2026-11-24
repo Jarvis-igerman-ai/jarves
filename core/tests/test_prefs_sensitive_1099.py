@@ -32,6 +32,10 @@ KEYS = [
     "fix token: refresh expiry",
     "tokens: rotate weekly",
     # #1099 review 3: camelCase-shaped key with two number chunks; a long random ID inside a share link
+    # #1099 review 4 (R2, R3): a bare 4+ digit PIN after "is"; a key word up to five words before SHA-length hex
+    "the key is 12345",
+    "my token is 4821.",
+    "api secret for the staging cluster is 9fceb02d0ae598e95dc970b74767f19372d61af8",
     "remember AbcdEfgh12IjklMnop34Qrst",                               # camelCase-shaped, two number chunks
     "open https://docs.google.com/document/d/1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT/edit",
 ]
@@ -63,13 +67,14 @@ PLAIN = [
     "rename handleOAuth2CallbackResponse in the auth module",
     "call getUserPreferences2Async on start",
     "the key is under the mat",
+    "the token is 5 minutes old",                                  # a short count is not a PIN
     # #1099 review R1: git SHA lengths without a key word, and low-entropy hex, stay allowed
     "use sha256 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
     "merged as 9fceb02d0ae598e95dc970b74767f19372d61af8 yesterday",
-    "abababababababababababababab1a1a1a",
+    "abababababababababababababab1a1a1a",                          # low-entropy hex filler
     # #1099 review 3: Hebrew key words are whole words ("יסודי" is no "סוד"); a typical URL is not a key
     "בדיקה יסודית של 9fceb02d0ae598e95dc970b74767f19372d61af8",
-    "play https://www.youtube.com/watch?v=dQw4w9WgXcQ in the kitchen",            # low-entropy hex filler
+    "play https://www.youtube.com/watch?v=dQw4w9WgXcQ in the kitchen",  # typical URL with an 11-character ID is not a key
 ]
 
 
