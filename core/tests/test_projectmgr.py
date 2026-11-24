@@ -1221,6 +1221,8 @@ def test_claim_stage_atomic_guard_against_a_racing_stop(env):
 FAKE_GH = textwrap.dedent('''
     import json, os, sys
     a = sys.argv[1:]
+    with open(os.path.join(os.path.dirname(__file__), "gh_calls.jsonl"), "a") as f:
+        f.write(json.dumps({"argv": a, "cwd": os.getcwd(), "git_dir": os.environ.get("GIT_DIR", "")}) + "\\n")
     if a[:2] == ["auth", "status"]:
         sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
     if a[:2] == ["issue", "list"]:
@@ -1258,18 +1260,21 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     sh(repo, "git", "init", "-q", "-b", "main")
     sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
     assert forge.repo_slug(str(repo)) == "o/r"
-    st = forge.status(str(repo))
+    st = forge.status("o/r")
     assert st["gh"] and not st["signed_in"]
     (tmp_path / "signed_in").write_text("1")
     try:
-        st = forge.status(str(repo))
+        st = forge.status("o/r")
         assert st["signed_in"] and st["repo"] == "o/r"
-        rows = forge.issues(str(repo))
+        rows = forge.issues("o/r")
         assert rows and rows[0]["number"] == 7 and rows[0]["labels"] == ["bug"]
-        url = forge.create_pr(str(repo), "jarves/p1/t1-a1", "main", "title", "body")
+        url = forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "title", "body")
         assert url.endswith("/pull/9")
-        checks = forge.pr_checks(str(repo), "9")
+        checks = forge.pr_checks("o/r", "9")
         assert checks and checks[0]["bucket"] == "pass"
+        for bad in ("", "o", "o/r/x", "../r", "o/..", "o r/x", "--repo=x/y"):
+            with pytest.raises(forge.ForgeError):
+                forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
     with pytest.raises(forge.ForgeError):
@@ -1288,6 +1293,47 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
+
+
+def test_gh_never_runs_in_the_project_or_follows_its_config(fake_gh, tmp_path):
+    """#1622: an agent-written origin/insteadOf in the shared config does not move gh's target, and gh runs outside
+    the project with no repository for its own git reads."""
+    from jarves.projectmgr import forge
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/evil/fork.git")
+    sh(repo, "git", "config", "url.https://github.com/evil/.insteadOf", "https://github.com/o/")
+    (tmp_path / "signed_in").write_text("1")
+    try:
+        forge.status("o/r")
+        forge.issues("o/r", label="bug")
+        forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b")
+        forge.pr_checks("o/r", "9")
+    finally:
+        (tmp_path / "signed_in").unlink(missing_ok=True)
+    calls = [json.loads(x) for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 4 and calls[0]["argv"] == ["auth", "status"]
+    proj = os.path.normcase(os.path.realpath(repo))
+    for c in calls:
+        assert not os.path.normcase(os.path.realpath(c["cwd"])).startswith(proj)
+        assert not os.path.exists(c["cwd"])                          # a removed empty folder, not the project
+        assert c["git_dir"] and not os.path.exists(c["git_dir"])     # gh's own git reads find no repository
+        if c["argv"][:2] != ["auth", "status"]:
+            assert c["argv"][-2:] == ["--repo", "o/r"] and "evil" not in " ".join(c["argv"])
+
+
+def test_github_status_uses_the_recorded_repo_not_todays_origin(env, fake_gh):
+    m, repo, _ = env
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
+    open_project(m, repo)
+    assert m.call("configure", project="demo", github="read")["ok"]
+    sh(repo, "git", "remote", "set-url", "origin", "https://github.com/evil/fork.git")   # an agent rewrites it
+    g = m.call("github", project="demo")
+    assert g["ok"] and g["repo"] == "o/r" and g["origin"] == "evil/fork" and "elsewhere" in g["text"]
+    assert m.call("configure", project="demo", github="off")["ok"]
+    g = m.call("github", project="demo")
+    assert g["ok"] and g["repo"] == "" and g["mode"] == "off"
 
 
 def _rule_matches(rule: str, cmd: str) -> bool:

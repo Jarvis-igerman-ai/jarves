@@ -370,9 +370,10 @@ class Manager(StageEngine):
         if github is not None:
             if github not in forge.MODES:
                 return _res(False, "BAD_GITHUB", "github is off, read or write")
-            if github != "off" and not forge.repo_slug(p["path"]):
+            slug = forge.repo_slug(p["path"]) if github != "off" else ""
+            if github != "off" and not slug:
                 return _res(False, "NOT_GITHUB", "this project's origin is not a github.com repository")
-            f["github"] = github
+            f["github"], f["github_repo"] = github, slug      # #1622: gh only ever targets this recorded repo
         self.db.update_project(p["id"], **f)
         return _res(True, "ok", "saved", project=self._pview(self.db.project(p["id"])))
 
@@ -380,10 +381,16 @@ class Manager(StageEngine):
         p, err = self._need_project(project)
         if err:
             return err
-        st = forge.status(p["path"])
         mode = p.get("github") or "off"
-        return _res(True, "ok", f"{p['name']}: GitHub {mode}" + (f" ({st['repo']})" if st["repo"] else
-                    " (no github.com remote)"), mode=mode, **st)
+        st = forge.status(p.get("github_repo") or "")
+        st["origin"] = forge.repo_slug(p["path"])          # today's origin, shown only; gh never follows it
+        if st["repo"]:
+            note = f" ({st['repo']})"
+        else:
+            note = " (no repository recorded" + (": run configure --github on the PC)" if mode != "off" else ")")
+        if st["repo"] and st["origin"] != st["repo"]:
+            note += f"; origin now points elsewhere ({st['origin'] or 'not github.com'}), JARVES keeps {st['repo']}"
+        return _res(True, "ok", f"{p['name']}: GitHub {mode}{note}", mode=mode, **st)
 
     def runners_info(self, **_) -> dict:
         rows = []

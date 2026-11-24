@@ -1,0 +1,1 @@
+- Fixed: projectmgr runs every `gh` call outside the project with an explicit `--repo` recorded when the owner sets the GitHub mode on the PC, so an agent-written remote, `insteadOf` or fsmonitor entry in the shared git config can no longer redirect a pull request or run a command through gh (#1622).
