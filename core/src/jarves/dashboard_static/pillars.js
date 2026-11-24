@@ -5,10 +5,16 @@
 "use strict";
 
 (function () {
-  const msgSpan = () => el("span", { class: "muted small", role: "status" });
+  // #1514: these refusals mean the page shows old wording: re-render it at once and carry the note to the new page
+  const RELOAD = ["PREF_CONFLICT", "PREF_TEXT_REQUIRED"];
+  let carried = "";
+  const msgSpan = () => { const s = el("span", { class: "muted small", role: "status" }); s.textContent = carried; carried = ""; return s; };
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
   async function act(msg, fn) {
-    try { await fn(); route(true); } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+    try { await fn(); route(true); } catch (e) {
+      const note = tx("נכשל: ", "Failed: ") + JL.t(e.message);
+      if (RELOAD.includes(e.code)) { carried = note; route(true); } else msg.textContent = note;
+    }
   }
   const WAITING = () => tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");
   const STATUS = { active: ["פעיל", "Active"], paused: ["מושהה", "Paused"], done: ["הושלם", "Completed"], dropped: ["בוטל", "Dropped"] };

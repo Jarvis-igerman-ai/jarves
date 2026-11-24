@@ -333,6 +333,8 @@ def make_skill(prefs: Preferences):
                 return ToolResult(True, "already " + r["status"].split("_")[1], r)
 
             async def confirm(a: ConfirmArgs):
+                # Runs only from SkillRegistry.call after _authorize, which always calls confirm_meta first (this tool
+                # always has a prompt). Any other caller has no bound wording and gets PREF_NOT_SHOWN: intended (#1514).
                 if a._shown is None:          # #1514: no approval showed the words (or the item was gone): nothing to confirm
                     if not prefs.get(a.id):
                         return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
@@ -452,7 +454,7 @@ def api_pref_op(ctx, m, body):
         except KeyError:
             return 404, {"error": "no such preference"}
         except PrefConflict:
-            return 409, {"error": "the preference changed meanwhile: reload the page", "code": "PREF_CONFLICT"}
+            return 409, {"error": "the preference changed meanwhile: check the new wording", "code": "PREF_CONFLICT"}
     try:
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}

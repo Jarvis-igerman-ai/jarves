@@ -3,6 +3,14 @@
 The order the issue names: wording A is shown, the owner says yes, an edit to B commits, then the confirm lands.
 That late confirm must leave B proposed; a confirm for the current wording still confirms it.
 """
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
 from jarves import dashboard
 from jarves import preferences as prefs_mod
 from jarves.config import Config
@@ -56,7 +64,8 @@ def test_dashboard_confirm_of_an_item_removed_meanwhile_is_404(home):
         p.remove(i, by="test")
         return real(i, **kw)
     p.confirm = removed_first
-    assert _op(ctx, id=pid, text=A)[0] == 404
+    assert prefs_mod._ctx(ctx) is p                  # review R4: the route uses this same cached instance
+    assert _op(ctx, id=pid, text=A)[0] == 404 and p.get(pid) is None
 
 
 def test_dashboard_confirm_matches_normalised_and_max_length_wording(home):
@@ -141,3 +150,37 @@ async def test_registry_hands_approval_meta_and_handler_the_same_args_instance()
     reg.allowed_actions |= {"t1514"}
     assert (await reg.call("t1514", {"n": 2}, origin="model")).ok
     assert len(seen) == 2 and seen[0] is seen[1]
+
+
+@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
+@pytest.mark.parametrize("code, reloads", [("PREF_CONFLICT", True), ("PREF_TEXT_REQUIRED", True), ("OTHER", False)])
+def test_dashboard_page_re_renders_with_the_new_wording_after_a_stale_confirm(code, reloads):
+    """Review R1 (#1740): after 409/400 the page re-fetches /api/prefs at once and keeps the note; other errors stay put."""
+    static = Path(prefs_mod.__file__).parent / "dashboard_static"
+    probe = """
+    const words = ["A", "B"]; let gets = 0, shown = [];
+    global.window = {}; global.PAGES = {}; global.JL = {t: (s) => s}; global.tx = (he, en) => en;
+    global.el = (tag, attrs, ...kids) => ({tag, attrs: attrs || {}, kids: kids.flat(), textContent: "", addEventListener() {}});
+    global.pill = global.header = (...a) => a;
+    const walk = (n, f) => { if (n && typeof n === "object") { f(n); (n.kids || (Array.isArray(n) ? n : [])).forEach((k) => walk(k, f)); } };
+    global.render = (...nodes) => walk(nodes, (n) => { if (n.tag === "b") shown.push(n.kids[0]);
+      if (n.attrs && n.attrs.role === "status" && n.textContent) shown.push("note:" + n.textContent); });
+    global.api = async (path, opts) => {
+      if (!opts) return {proposed: [{id: 1, text: words[gets++], topic: "other"}], items: [], declined: [], topics: ["other"]};
+      const e = new Error("changed"); e.code = process.argv[2]; throw e; };
+    global.route = () => PAGES.preferences();
+    require(process.argv[1]);
+    (async () => {
+      let confirm; global.render = ((r) => (...n) => { walk(n, (x) => { if (x.tag === "button" && x.kids[0] === "Confirm, remember it") confirm = x; }); r(...n); })(global.render);
+      await PAGES.preferences(); await confirm.attrs.onclick(); await new Promise((r) => setTimeout(r, 10));
+      console.log(JSON.stringify(shown));
+    })();"""
+    out = subprocess.run(["node", "-e", probe, str(static / "pillars.js"), code], capture_output=True, text=True,
+                         timeout=30, check=False)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == (["A", "note:Failed: changed", "B"] if reloads else ["A"])     # 2nd render: note, then B
+
+
+def test_dashboard_api_errors_carry_the_server_code():
+    app = (Path(prefs_mod.__file__).parent / "dashboard_static" / "app.js").read_text(encoding="utf-8")
+    assert "err.code = data.code" in app                  # pillars.js re-renders on PREF_CONFLICT / PREF_TEXT_REQUIRED
