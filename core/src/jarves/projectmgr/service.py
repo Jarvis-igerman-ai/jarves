@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -905,31 +906,41 @@ class Manager(StageEngine):
         p, err = self._need_project(project)
         if err:
             return err
+        br = gitops.integration_branch(p["id"])
+        try:            # the commit, not the movable name: prompt, commands and merge use the same one (#1407)
+            tip = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"refs/heads/{br}^{{commit}}",
+                             check=False).stdout.strip()
+        except (OSError, subprocess.SubprocessError, gitops.GitError) as e:
+            return _res(False, "GIT_ERROR", f"cannot read the integration branch {br}: {e}"[:300])
+        if not tip:
+            return _res(not apply, "NO_INTEGRATION" if apply else "ok", f"{p['name']}: no integration branch {br} "
+                        "yet, nothing to take.", branch=br, commit="", commands=[])
         if apply:
-            br = gitops.integration_branch(p["id"])
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
-            if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
-                                             {"project": p["name"], "branch": st["branch"]}):
+            if not yes and not self._approve(f"Merge {br} at commit {tip[:12]} into {st['branch']} in {p['path']}? "
+                                             "(no push)", "project_ship",
+                                             {"project": p["name"], "branch": st["branch"], "commit": tip[:12]}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), br, ident=False)      # your own git identity / signing
+            conflicts = gitops.merge_in(Path(p["path"]), tip, ident=False,     # your own git identity / signing
+                                        message=f"Merge branch '{br}' at commit {tip[:12]}")
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
-            return _res(True, "ok", f"Merged {br} into {st['branch']}. Nothing was pushed.")
+            return _res(True, "ok", f"Merged {br} at commit {tip[:12]} into {st['branch']}. Nothing was pushed.")
         wt = gitops.project_root(self.home, p["id"]) / "integration"
-        br = gitops.integration_branch(p["id"])
         try:
-            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{br}", check=False).stdout.strip() or "no changes"
-        except (OSError, gitops.GitError):
+            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{tip}", check=False).stdout.strip() or "no changes"
+        except (OSError, subprocess.SubprocessError, gitops.GitError):
             stat = "unknown"
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{br}", f"git -C \"{p['path']}\" merge --no-ff {br}   # when you are happy",
+        cmds = [f"git -C \"{p['path']}\" diff HEAD...{tip}", f"git -C \"{p['path']}\" merge --no-ff {tip}   # when you are happy",
                 f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
-        return _res(True, "ok", f"{p['name']}: integration branch {br} has {stat}. JARVES does not merge or push; "
-                                "the commands are in the result.", branch=br, worktree=str(wt), commands=cmds)
+        return _res(True, "ok", f"{p['name']}: integration branch {br} at commit {tip[:12]} has {stat}. JARVES does "
+                                "not merge or push; the commands are in the result.", branch=br, commit=tip,
+                    worktree=str(wt), commands=cmds)
 
     # ================================================================== the agents working on a project
     def _orch_call(self, op: str, **kw) -> dict:

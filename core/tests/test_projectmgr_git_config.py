@@ -260,3 +260,47 @@ def test_a_git_older_than_2_31_is_refused(monkeypatch, tmp_path):
     with pytest.raises(gitops.GitError, match=r"git 2\.31 or later \(found: 2\.30\)"):
         gitops.git(tmp_path, "status")
     assert calls == [["git", "version"]]                                           # nothing else ran
+
+
+def test_signing_programs_named_in_the_shared_config_never_run(tmp_path, _owner_home):
+    """#1407: on the ship path (ident=False) the owner's signing settings apply, but `gpg.program` (and the x509/ssh
+    programs) in the shared config would run an agent's script. The owner's global value is used instead, else git's
+    default program."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _cfg(repo, "gpg.program", _sh(marker, "exit 1"))
+    _cfg(repo, "gpg.x509.program", _sh(marker, "exit 1"))
+    _cfg(repo, "--global", "gpg.program", "false")                # the owner's signer (here: always fails)
+    env = gitops.shared_config_overrides(repo)
+    got = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert got["gpg.program"] == "false" and got["gpg.x509.program"] == "gpgsm"     # owner's, else git's default
+    (repo / "f.txt").write_text("signed?\n", encoding="utf-8")
+    gitops.git(repo, "add", "f.txt")
+    p = gitops.git(repo, "commit", "-qm", "s", "-S", check=False, ident=False)
+    assert not marker.exists(), p.stderr                          # the agent's program never ran
+
+
+def test_config_hooks_of_every_scope_run_a_no_op(tmp_path, _owner_home):
+    """#1407: `hook.<name>.command` (git 2.54+; CI's 2.43 has none, so this checks the overrides) of any scope, a
+    name with `=` and dots included, becomes HOOK_NOOP: no hook runs for JARVES git calls (#1381)."""
+    repo = _repo(tmp_path)
+    _cfg(repo, "hook.a=b.c.command", "evil")
+    _cfg(repo, "--global", "hook.mine.command", "owner-hook")
+    _cfg(repo, "hook.mine.event", "pre-commit")
+    env = gitops.shared_config_overrides(repo)
+    got = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert got["hook.a=b.c.command"] == got["hook.mine.command"] == gitops.HOOK_NOOP
+
+
+def test_git_ignores_replace_refs_and_grafts_from_the_shared_repository(tmp_path):
+    """#1407 (review of #1720): replace refs and `.git/info/grafts` are agent-writable and swap what a commit the
+    owner approved contains or descends from. JARVES's git calls see the real objects."""
+    repo = _repo(tmp_path)
+    base = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "f.txt").write_text("swapped\n", encoding="utf-8")
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "x"], cwd=repo, check=True)
+    other = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "replace", base, other], cwd=repo, check=True)
+    assert gitops.git(repo, "show", f"{base}:f.txt").stdout == "base\n"
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{other}\n", encoding="utf-8")      # `other` has no parent now
+    assert gitops.git(repo, "rev-list", "--count", other).stdout.strip() == "2"
