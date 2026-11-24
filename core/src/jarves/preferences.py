@@ -83,19 +83,33 @@ _CRED_WORD = (r"(?:(?<![A-Za-z])(?:(?:api|auth|access|private|client|secret|bear
               r"|(?<![א-ת])[והשבכלמ]{0,3}(?:טוק(?:ן|נים|ני|נו)|אסימו(?:ן|נים|ני|נו)|מפתח(?:ות|ה|ו|י|ך)?"
               r"|סוד(?:ות|י|ו|ך|נו|ם|כם)?)(?![א-ת]))")
 _CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[^\W_]+[\W_]+){0,4}$", re.I)
-_CRED_AFTER = re.compile(r"^[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
+_CRED_AFTER = re.compile(r"[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
+_CRED_ONLY = re.compile(_CRED_WORD, re.I)
 _HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$",
                         re.I)
+_ASSIGNED = re.compile(r"[:=]|\b(?:is|was|are|were)\b", re.I)
 _WORD_TOK = re.compile(r"[A-Z]{2,}(?![a-z])|[A-Z]?[a-z]+|[A-Z](?![A-Za-z])|[0-9]+")
+_WORD_TAIL = re.compile(r"\w*")
 
 
 def _cred_near(t: str, m: re.Match) -> bool:
-    """A credential word up to four words before the value or three words after it."""
-    return bool(_CRED_BEFORE.search(t[max(0, m.start() - 60):m.start()]) or _CRED_AFTER.search(t[m.end():m.end() + 40]))
+    """A credential word up to four words before the value or three words after it. The windows are searched in place
+    (pos/endpos), so a word cut by the window edge ("mon|key") is not read as a credential word. A topic word before the
+    value ("fixed token refresh in commit <SHA>") does not count when a hash word sits between it and the value and
+    nothing assigns it (no ':', '=', 'is'/'was')."""
+    end = _WORD_TAIL.match(t, min(len(t), m.end() + 40)).end()
+    if _CRED_AFTER.match(t, m.end(), end):
+        return True
+    cb = _CRED_BEFORE.search(t, max(0, m.start() - 60), m.start())
+    if not cb:
+        return False
+    word = _CRED_ONLY.match(t, cb.start())
+    gap = t[word.end():m.start()]
+    return not (_HASH_NEAR.search(gap) and not _ASSIGNED.search(gap) and not _CRED_ONLY.search(gap))
 
 
 def _hash_named(t: str, m: re.Match) -> bool:
-    return bool(_HASH_NEAR.search(t[max(0, m.start() - 40):m.start()]))
+    return bool(_HASH_NEAR.search(t, max(0, m.start() - 40), m.start()))
 
 
 def _random_mixed(run: str) -> bool:

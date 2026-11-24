@@ -116,9 +116,28 @@ def test_named_shas_and_digests_with_a_digit_run_are_allowed(text):
 
 
 @pytest.mark.parametrize("word", ["password", "salary", "credit card", "סיסמה", "משכורת"])
-def test_word_rules_still_see_a_named_sha(word):
-    # Blanking a named SHA only hides it from the long-number rule; the sensitive-word rules see the whole text.
+def test_word_rules_still_fire_next_to_a_named_sha(word):
     assert looks_sensitive(f"commit {SHA40_DIGITS} {word}"), word
+
+
+def test_a_word_cut_by_the_window_edge_is_not_a_credential_word():
+    # The 60-char window before and 40-char window after the value cut "monkey" / "keyboard" to "key" (#1482 review).
+    value = "3f9c2ab4e1d07b5a"
+    assert not looks_sensitive("xmonkey" + " " * 57 + value)
+    assert not looks_sensitive(value + " " * 37 + "keyboard")
+    assert looks_sensitive("a key" + " " * 57 + value)
+
+
+@pytest.mark.parametrize("text", ["fixed token refresh in commit 3f9c2ab4", "webhook retry regression since commit " + SHA40,
+                                  "secret rotation landed in commit " + SHA40_DIGITS])
+def test_a_topic_word_before_a_named_commit_keeps_the_sha(text):
+    assert not looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["token: commit 3f9c2ab4e1d07b5a", "the key is commit " + SHA40,
+                                  "token refresh in commit key 3f9c2ab4e1d07b5a"])
+def test_an_assigned_or_nearer_credential_word_still_refuses_a_named_sha(text):
+    assert looks_sensitive(text), text
 
 
 def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):
