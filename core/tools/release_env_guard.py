@@ -4,7 +4,7 @@ GitHub creates an environment named by a job on first use WITHOUT protection rul
 alone does not keep RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY behind the owner. This reads the environment and its
 deployment policies over the GitHub API (read-only) and exits 1 unless it has a required reviewer AND a custom policy
 made only of tag rules (at least one, no branch rule). That is docs/RELEASING.md "Owner settings", step 3; the tag
-ruleset (step 2) and where the secrets live (step 4) cannot be read here. `can_admins_bypass: true` is a warning only.
+ruleset (step 2) and where the secrets live (step 4) cannot be read here. `can_admins_bypass: true` and a tag rule other than exactly `v*.*.*` are warnings only.
 Any API or parse failure also refuses (fail closed).
 
     python core/tools/release_env_guard.py --repo OWNER/REPO          # uses `gh api` (GH_TOKEN)
@@ -54,10 +54,15 @@ def _custom(env: dict) -> bool:
     return isinstance(policy, dict) and policy.get("custom_branch_policies") is True
 
 
-def warnings(env: object) -> list[str]:
+def warnings(env: object, policies: object = None) -> list[str]:
+    out = []
     if isinstance(env, dict) and env.get("can_admins_bypass") is not False:
-        return ["administrators may bypass the required reviewer (untick 'Allow administrators to bypass')"]
-    return []
+        out.append("administrators may bypass the required reviewer (untick 'Allow administrators to bypass')")
+    entries = policies.get("branch_policies") if isinstance(policies, dict) else None
+    if isinstance(entries, list) and not any(isinstance(e, dict) and e.get("type") == "tag" and e.get("name") == "v*.*.*" for e in entries):
+        # a broad tag rule (for example *) still passes; only the reviewer and the tag ruleset then guard the secrets
+        out.append("no tag deployment rule is exactly v*.*.* (a broader tag rule admits more tags)")
+    return out
 
 
 def _gh(path: str) -> object:
@@ -95,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     found = problems(env, policies)
     for p in found:
         print(f"::error::{ENV_NAME} is not protected, refusing the publish (#544): {p}")
-    for w in warnings(env):
+    for w in warnings(env, policies):
         print(f"::warning::{ENV_NAME}: {w}")
     if not found:
         print(f"{ENV_NAME}: required reviewer and tag-only deployment policy present")

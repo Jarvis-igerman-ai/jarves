@@ -108,9 +108,23 @@ def test_cli_fails_closed(tmp_path, capsys):
 def test_release_workflow_runs_guard_right_before_the_secret_step():
     job = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))["jobs"]["stable"]
     steps = job["steps"]
-    idx = next(i for i, s in enumerate(steps) if "secrets." in str(s))
+    # review R3: pick the secrets step by name, and check no other step reads the secrets
+    idx = next(i for i, s in enumerate(steps) if str(s.get("name", "")).startswith("Publish the stable release"))
+    assert "secrets." in str(steps[idx])
+    assert [s.get("name") for s in steps if "secrets." in str(s)] == [steps[idx]["name"]]
     step = steps[idx - 1]
+    # review R1: the guard's gh api call has a token on the step itself, under a job that can read environments
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert job["permissions"]["actions"] == "read"
     assert "secrets." not in str(step)
     assert "tools/release_env_guard.py" in step["run"]
     # same condition as the publish step: whenever the secrets step would run, the guard ran first and passed
     assert step.get("if") == steps[idx]["if"]
+
+
+def test_broad_tag_rule_passes_with_a_warning():
+    # review R2: a tag rule other than exactly v*.*.* is not refused, but it is reported
+    broad = {"total_count": 1, "branch_policies": [{"name": "*", "type": "tag"}]}
+    assert guard.problems(PROTECTED, broad) == []
+    assert any("v*.*.*" in w for w in guard.warnings(PROTECTED, broad))
+    assert guard.warnings(PROTECTED, TAG_ONLY) == []
