@@ -92,8 +92,13 @@ def pytest_itemcollected(item):
 
 
 def _userns() -> bool:
+    import subprocess
+
     from jarves.projectmgr import gitops
-    return gitops.confine_available()
+    try:
+        return gitops.confine_available()
+    except subprocess.SubprocessError:            # a probe that failed for an unknown reason: not cached, deselect
+        return False
 
 
 def pytest_collection_modifyitems(config, items):

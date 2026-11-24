@@ -102,26 +102,25 @@ class Runner:
         shim = ""
         try:
             if check_argv and not read_only and gitops.confine_available():
-                shim = check_shim(gitops.confined(check_argv, cwd))
-                check_argv, prompt = [SHIM], prompt + SHIM_NOTE
+                shim = check_shim(gitops.confined(check_argv, cwd), gitops.child_env())
+                script = os.path.join(shim, SHIM)          # absolute: a shell that resets PATH still finds it (R4)
+                check_argv, prompt = [script], prompt + SHIM_NOTE.format(script)
         except (OSError, subprocess.SubprocessError) as e:
             return Result(error=f"could not confine the check for {self.name}: {e}")
         try:
-            return self._run(prompt, cwd, model, resume, read_only, check_argv, timeout, on_start, cancel, team, shim)
+            return self._run(prompt, cwd, model, resume, read_only, check_argv, timeout, on_start, cancel, team)
         finally:
             if shim:
                 os.chmod(shim, 0o700)
                 shutil.rmtree(shim, ignore_errors=True)
 
-    def _run(self, prompt, cwd, model, resume, read_only, check_argv, timeout, on_start, cancel, team, shim) -> Result:
+    def _run(self, prompt, cwd, model, resume, read_only, check_argv, timeout, on_start, cancel, team) -> Result:
         try:
             spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
                               team=team)
             check_flags(spec.argv)
         except ValueError as e:
             return Result(error=str(e))
-        if shim:
-            spec.env["PATH"] = shim + os.pathsep + spec.env.get("PATH", "")
         try:
             p = subprocess.Popen(spec.argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
@@ -157,17 +156,19 @@ class Runner:
 
 
 SHIM = "jarves-check"
-SHIM_NOTE = f"\n\nRun the project's check command as `{SHIM}` (your arguments are passed on to it)."
+SHIM_NOTE = "\n\nRun the project's check command as `{}` (your arguments are passed on to it)."
 
 
-def check_shim(argv: list[str]) -> str:
-    """A private folder with one `jarves-check` script that runs the (confined) check command, for the agent's PATH
-    (#1592): the agent's allow rule names only this script, so the check's code never runs in the agent's process
-    tree, which must write its own state (~/.claude). The folder is read-only; the caller removes it after the run."""
+def check_shim(argv: list[str], env: dict[str, str]) -> str:
+    """A private folder with one `jarves-check` script that runs the (confined) check command (#1592): the agent's
+    allow rule names only this script by its absolute path, so the check's code never runs in the agent's process
+    tree, which must write its own state (~/.claude). It runs with `env -i` and only the allow-listed `env`
+    (gitops.child_env), not the agent's environment. The folder is read-only; the caller removes it after the run."""
     d = tempfile.mkdtemp(prefix="jarves-check-")
     f = os.path.join(d, SHIM)
+    pre = [shutil.which("env") or "/usr/bin/env", "-i", *(f"{k}={v}" for k, v in sorted(env.items()))]
     with open(f, "w", encoding="utf-8") as fh:
-        fh.write("#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in argv) + ' "$@"\n')
+        fh.write("#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in [*pre, *argv]) + ' "$@"\n')
     os.chmod(f, 0o500)
     os.chmod(d, 0o500)
     return d

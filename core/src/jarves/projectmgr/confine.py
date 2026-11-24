@@ -17,11 +17,13 @@ The mounts are locked for nested namespaces (no umount, no clearing read-only).
 Honest limits: Linux with user namespaces and kernel 5.12+ only (Windows/macOS run as before, #1665; elsewhere JARVES
 logs once that it cannot confine). A socket bound after the run started is not covered. The owner's release command
 is not confined (its scope is an owner decision, see #1592). Stdlib only: run as `python -I confine.py SPEC --
-argv...`; a setup failure exits 125 and never runs argv.
+argv...`; a setup failure exits 125 and never runs argv; a kernel that cannot confine at all (no user namespaces, or
+no open_tree/mount_setattr) exits 122 instead, the only answer that turns confinement off (gitops).
 """
 from __future__ import annotations
 
 import ctypes
+import errno
 import json
 import os
 import signal
@@ -31,6 +33,8 @@ import sys
 from pathlib import Path
 
 FAIL = 125
+UNSUPPORTED = 122            # this kernel/host cannot confine (EPERM/ENOSPC/EINVAL on a userns, ENOSYS on a syscall)
+NO_USERNS = {errno.EPERM, errno.ENOSPC, errno.EINVAL, errno.ENOSYS, errno.EACCES}
 AT_FDCWD, AT_EMPTY_PATH, AT_RECURSIVE = -100, 0x1000, 0x8000
 OPEN_TREE_CLONE, MOVE_MOUNT_F_EMPTY_PATH, MOUNT_ATTR_RDONLY = 1, 4, 1
 SYS_OPEN_TREE, SYS_MOVE_MOUNT, SYS_MOUNT_SETATTR = 428, 429, 442     # the same number on x86_64 and arm64
@@ -41,21 +45,19 @@ MAX_SOCKETS = 4096
 
 
 def _sockets(hidden: list[str]) -> list[str]:
-    """Bound unix socket paths of the host (not abstract ones, not under a hidden folder), at most MAX_SOCKETS."""
+    """Bound unix socket paths of the host (not abstract ones, not under a hidden folder). OSError when the list cannot
+    be read or has more than MAX_SOCKETS paths: then a run cannot be confined (never a partial cover)."""
     out: list[str] = []
-    try:
-        with open("/proc/net/unix", encoding="utf-8", errors="replace") as f:
-            lines = f.read().splitlines()[1:]
-    except OSError:
-        return out
+    with open("/proc/net/unix", encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()[1:]
     for line in lines:
         parts = line.split(None, 7)
         p = parts[7] if len(parts) == 8 else ""
         if p.startswith("/") and not any(p == h or p.startswith(h + "/") for h in hidden) and p not in out \
                 and os.path.exists(p):
             out.append(p)
-        if len(out) >= MAX_SOCKETS:
-            break
+            if len(out) > MAX_SOCKETS:
+                raise OSError(errno.E2BIG, f"more than {MAX_SOCKETS} bound unix sockets, they cannot all be covered")
     return out
 
 
@@ -75,16 +77,21 @@ def wrap(argv: list[str], s: dict) -> list[str]:
     return [sys.executable, "-I", str(Path(__file__).resolve()), json.dumps(s), "--", *argv]
 
 
-def _ok(r: int, what: str) -> int:
+class Unsupported(OSError):
+    """The kernel or host policy cannot give this confinement at all (not a failure of this one run)."""
+
+
+def _ok(r: int, what: str, unsupported: frozenset[int] | set[int] = frozenset()) -> int:
     if r < 0:
         e = ctypes.get_errno()
-        raise OSError(e, f"{what}: {os.strerror(e)}")
+        raise (Unsupported if e in unsupported else OSError)(e, f"{what}: {os.strerror(e)}")
     return r
 
 
 def _setattr(libc, fd: int, path: bytes, flags: int, clear: bool = False) -> None:
     attr = struct.pack("QQQQ", 0 if clear else MOUNT_ATTR_RDONLY, MOUNT_ATTR_RDONLY if clear else 0, 0, 0)
-    _ok(libc.syscall(SYS_MOUNT_SETATTR, fd, path, flags, attr, len(attr)), f"read-only {path.decode() or fd}")
+    _ok(libc.syscall(SYS_MOUNT_SETATTR, fd, path, flags, attr, len(attr)), f"read-only {path.decode() or fd}",
+        {errno.ENOSYS})
 
 
 def _loopback_up() -> None:
@@ -98,17 +105,21 @@ def _loopback_up() -> None:
 def enter(s: dict):
     """Everything but the PID namespace's own /proc (that needs the forked PID 1). Returns libc."""
     uid, gid, cwd = os.getuid(), os.getgid(), os.getcwd()
-    os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNS | os.CLONE_NEWNET | os.CLONE_NEWPID)
-    for name, text in (("setgroups", "deny"), ("uid_map", f"{uid} {uid} 1"), ("gid_map", f"{gid} {gid} 1")):
-        with open(f"/proc/self/{name}", "w", encoding="ascii") as f:
-            f.write(text)
+    try:                                          # a userns sysctl, AppArmor or seccomp policy says no
+        os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNS | os.CLONE_NEWNET | os.CLONE_NEWPID)
+        for name, text in (("setgroups", "deny"), ("uid_map", f"{uid} {uid} 1"), ("gid_map", f"{gid} {gid} 1")):
+            with open(f"/proc/self/{name}", "w", encoding="ascii") as f:
+                f.write(text)
+    except OSError as e:
+        raise (Unsupported if e.errno in NO_USERNS else OSError)(e.errno, f"user namespace: {e.strerror}") from e
     _loopback_up()
     libc = ctypes.CDLL(None, use_errno=True)
     libc.syscall.restype = ctypes.c_long
-    _ok(libc.mount(None, b"/", None, MS_REC | MS_PRIVATE, None), "private /")
+    _ok(libc.mount(None, b"/", None, MS_REC | MS_PRIVATE, None), "private /", {errno.EPERM, errno.EACCES})  # AppArmor
     trees = []                                    # copies taken BEFORE everything turns read-only
     for p, ro in [(p, False) for p in s["rw"]] + [(p, True) for p in s["ro"]]:
-        fd = _ok(libc.syscall(SYS_OPEN_TREE, AT_FDCWD, p.encode(), OPEN_TREE_CLONE | AT_RECURSIVE), f"copy {p}")
+        fd = _ok(libc.syscall(SYS_OPEN_TREE, AT_FDCWD, p.encode(), OPEN_TREE_CLONE | AT_RECURSIVE), f"copy {p}",
+                 {errno.ENOSYS})
         if ro:
             _setattr(libc, fd, b"", AT_EMPTY_PATH | AT_RECURSIVE)
         trees.append((p, fd))
@@ -148,6 +159,9 @@ def main(args: list[str]) -> int:
         return FAIL
     try:
         libc = enter(json.loads(args[0]))
+    except Unsupported as e:
+        print(f"jarves-confine: this machine cannot confine a run: {e}", file=sys.stderr)
+        return UNSUPPORTED
     except (OSError, ValueError, KeyError, TypeError) as e:
         print(f"jarves-confine: could not confine the run: {e}", file=sys.stderr)
         return FAIL

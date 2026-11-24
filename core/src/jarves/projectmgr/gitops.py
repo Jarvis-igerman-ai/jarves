@@ -258,18 +258,26 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
 _CONFINE: dict[str, object] = {}
 
 
+class ConfineProbeError(subprocess.SubprocessError):
+    """The confinement probe failed for an unknown reason (timeout, no memory, a crash): this run fails closed."""
+
+
 def confine_available() -> bool:
-    """Can this machine run a command in the read-only git namespace (confine.py)? Probed once; a "no" is logged once."""
+    """Can this machine run a command in the read-only git namespace (confine.py)? A "yes", and a "no" for a known
+    reason (not Linux, or confine.py's UNSUPPORTED: no user namespaces or kernel < 5.12), is kept and a "no" logged
+    once. Any other probe failure raises ConfineProbeError and is not kept, so callers fail closed and re-probe."""
     if "ok" not in _CONFINE:
         why = "not Linux (tracked in #1665)"
         if sys.platform.startswith("linux"):
+            probe = {"rw": [], "ro": [os.path.dirname(confine.__file__)], "mask": [], "sockets": []}
             try:
-                probe = {"rw": [], "ro": [os.path.dirname(confine.__file__)], "mask": [], "sockets": []}
                 p = subprocess.run(confine.wrap(["true"], probe), capture_output=True, text=True, timeout=30,
                                    stdin=subprocess.DEVNULL, check=False)
-                why = "" if p.returncode == 0 else (p.stderr.strip()[-200:] or f"exit {p.returncode}")
             except (OSError, subprocess.SubprocessError) as e:
-                why = str(e)
+                raise ConfineProbeError(f"confinement probe failed: {e}") from e
+            if p.returncode not in (0, confine.UNSUPPORTED):
+                raise ConfineProbeError(f"confinement probe failed: {p.stderr.strip()[-200:] or p.returncode}")
+            why = "" if p.returncode == 0 else (p.stderr.strip()[-200:] or "unsupported")
         _CONFINE["ok"] = not why
         if why:
             log.warning("projectmgr: check runs are not confined, the shared git files stay writable (#1592): %s", why)

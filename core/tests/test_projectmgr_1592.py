@@ -159,16 +159,17 @@ def test_a_check_has_no_network_but_a_loopback(project):
 
 
 class _Script(runners.Runner):
-    """A stand-in agent: it runs `jarves-check` (the only check it is allowed) from its PATH, like Claude's Bash tool."""
+    """A stand-in agent: it runs the check it is allowed (sys.argv[1], the absolute script path), like Claude's Bash."""
     name = "fake"
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, env: dict[str, str] | None = None) -> None:
         super().__init__()
-        self.code, self.seen = code, {}
+        self.code, self.seen, self.env = code, {}, env
 
     def build(self, prompt, cwd, **kw) -> runners.Spec:
         self.seen.update(prompt=prompt, check_argv=kw.get("check_argv"))
-        return runners.Spec([sys.executable, "-c", self.code], None, gitops.child_env())
+        env = self.env if self.env is not None else gitops.child_env()
+        return runners.Spec([sys.executable, "-c", self.code, *(kw.get("check_argv") or [])], None, env)
 
     def parse(self, stdout: str, rc: int) -> runners.Result:
         return runners.Result(ok=rc == 0, text=stdout)
@@ -179,11 +180,12 @@ class _Script(runners.Runner):
 def test_an_agent_runs_the_check_only_through_the_confined_jarves_check_script(project):
     repo, integ, wt, sock = project
     before = _state(repo, integ, wt, sock)
-    agent = _Script("import subprocess, sys; sys.stdout.write(subprocess.run(['jarves-check'], capture_output=True, "
-                    "text=True).stdout); open('agent.txt', 'w').write('mine')")
+    agent = _Script("import subprocess, sys; sys.stdout.write(subprocess.run([sys.argv[1]], capture_output=True, "
+                    "text=True, env={}).stdout); open('agent.txt', 'w').write('mine')")   # review R4: no PATH needed
     r = agent.run("p", str(wt), check_argv=_attack(repo, integ, wt, sock), timeout=60)
     assert r.ok and "denied" in r.text and "WROTE" not in r.text, (r.error, r.text)
-    assert agent.seen["check_argv"] == ["jarves-check"] and "`jarves-check`" in agent.seen["prompt"]
+    (shim,) = agent.seen["check_argv"]
+    assert os.path.isabs(shim) and shim.endswith("/jarves-check") and f"`{shim}`" in agent.seen["prompt"]
     assert not _survivor_alive() and _state(repo, integ, wt, sock) == before
     assert (wt / "agent.txt").read_text() == "mine"             # the agent itself is not confined
     assert not list(Path(runners.tempfile.gettempdir()).glob("jarves-check-*"))  # the script folder is removed
@@ -292,3 +294,70 @@ def test_the_spec_keeps_only_the_worktree_writable_and_hides_run(project, monkey
     assert confine.spec(wt)["ro"] == [str(wt.resolve() / ".git")]          # no readable shared git dir: none kept
     monkeypatch.undo()
     assert "/run" in confine.HIDE and "/tmp" in confine.HIDE
+
+
+@pytest.mark.linux_only
+@pytest.mark.userns
+def test_the_check_script_runs_with_the_allow_listed_env_not_the_agents(project, monkeypatch):
+    """Review R5: a secret in the agent's environment is not passed on to the check's code."""
+    repo, integ, wt, sock = project
+    monkeypatch.setenv("JARVES_1592_SECRET", "s3cret")
+    agent = _Script("import subprocess, sys; sys.stdout.write(subprocess.run([sys.argv[1]], capture_output=True, "
+                    "text=True).stdout)", env=dict(os.environ))
+    code = "import os; print(repr(os.environ.get('JARVES_1592_SECRET')), 'PATH' in os.environ)"
+    r = agent.run("p", str(wt), check_argv=[sys.executable, "-c", code], timeout=60)
+    assert r.ok and r.text.strip() == "None True", (r.error, r.text)
+
+
+def test_claudes_allow_rule_names_the_check_script_by_its_absolute_path(tmp_path):
+    """Review R4: the real Claude runner allows exactly the absolute script path (a reset PATH cannot hide it)."""
+    shim = str(tmp_path / "jarves-check-x" / runners.SHIM)
+    spec = runners.ClaudeRunner().build("p", str(tmp_path), check_argv=[shim])
+    assert f"Bash({shim}:*)" in spec.argv
+
+
+def _probe(monkeypatch, result):
+    monkeypatch.setattr(gitops, "_CONFINE", {})
+    monkeypatch.setattr(gitops.sys, "platform", "linux")
+
+    def run(*a, **k):
+        if isinstance(result, BaseException):
+            raise result
+        return subprocess.CompletedProcess(a, result, "", "boom")
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+
+
+@pytest.mark.parametrize("result", [subprocess.TimeoutExpired("probe", 30), OSError(12, "ENOMEM"), 1, confine.FAIL])
+def test_a_probe_that_fails_for_an_unknown_reason_fails_the_run_closed_and_is_not_cached(monkeypatch, tmp_path, result):
+    """Review R1: only a known "this kernel cannot" answer turns confinement off; anything else fails this run."""
+    _probe(monkeypatch, result)
+    ok, out = gitops.run_check(tmp_path, [sys.executable, "-c", "open('ran.txt', 'w')"])
+    assert not ok and out.startswith("check could not be confined") and not (tmp_path / "ran.txt").exists()
+    assert "ok" not in gitops._CONFINE                                # the next run probes again
+
+
+def test_a_kernel_without_user_namespaces_is_reported_once_and_cached(monkeypatch, caplog, tmp_path):
+    _probe(monkeypatch, confine.UNSUPPORTED)
+    with caplog.at_level(logging.WARNING, logger=gitops.__name__):
+        assert gitops.confined(["echo"], tmp_path) == ["echo"] and gitops.confined(["echo"], tmp_path) == ["echo"]
+    assert gitops._CONFINE == {"ok": False} and len(caplog.records) == 1
+
+
+@pytest.mark.parametrize("err", [1, 28, 38])                    # EPERM, ENOSPC (userns sysctl/AppArmor), ENOSYS
+def test_confine_reports_a_kernel_that_cannot_with_its_own_exit_code(monkeypatch, err):
+    def no(_flags):
+        raise OSError(err, os.strerror(err))
+    monkeypatch.setattr(confine.os, "unshare", no, raising=False)
+    assert confine.main(["{}", "--", "true"]) == confine.UNSUPPORTED
+
+
+def test_too_many_sockets_fails_the_setup_instead_of_leaving_some_reachable(monkeypatch, tmp_path):
+    """Review R2: never a silent cap; more sockets than can be covered means no run."""
+    monkeypatch.setattr(confine, "MAX_SOCKETS", 2)
+    monkeypatch.setattr(confine.os.path, "exists", lambda p: True)
+    rows = "".join(f"0: 00000002 0 10000 0001 01 1 /s/{i}\n" for i in range(3))
+    real = open
+    monkeypatch.setattr("builtins.open", lambda p, *a, **k: __import__("io").StringIO("hdr\n" + rows)
+                        if p == "/proc/net/unix" else real(p, *a, **k))
+    with pytest.raises(OSError, match="more than 2"):
+        confine._sockets([])
