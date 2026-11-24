@@ -44,6 +44,12 @@ def _plant_code(cfg: Path, wt: Path, marker: Path) -> str:
             f"open({str(wt / 'new.txt')!r}, 'w').write('y')")
 
 
+def _point(dotgit: Path, gd: Path) -> None:
+    """Rewrite a worktree's `.git` pointer (unlink first: on Windows git marks it hidden, which `open('w')` refuses)."""
+    dotgit.unlink()
+    dotgit.write_text(f"gitdir: {gd.as_posix()}\n", encoding="utf-8")
+
+
 class _Planter(runners.Runner):
     name = "planter"
 
@@ -79,7 +85,7 @@ def test_rejected_copies_are_ordered_capped_and_the_file_mode_is_kept(tmp_path, 
     cfg.chmod(0o644)
     monkeypatch.setattr(gitops.time, "time_ns", lambda: 1)
     for i in range(gitops.KEEP_REJECTED + 2):
-        ok, out = gitops.run_check(wt, [sys.executable, "-c", f"open({str(cfg)!r}, 'a').write('#{i}\\n')"])
+        ok, out = gitops.run_check(wt, [sys.executable, "-c", f"open({str(cfg)!r}, 'ab').write(b'#{i}\\n')"])
         assert not ok and "shared git files (config)" in out
     kept = [f.read_bytes()[-3:] for f in sorted(cfg.parent.glob("config.jarves-rejected-*"))]
     assert kept == [f"#{i}\n".encode() for i in range(2, gitops.KEEP_REJECTED + 2)]
@@ -122,7 +128,7 @@ def test_a_planted_worktree_pointer_to_a_fake_git_folder_is_never_followed(tmp_p
     marker = tmp_path / "ran"
     exec(_plant_code(fake / "config", wt, marker))
     (fake / "worktrees" / wt.name / "commondir").write_text(str(fake), encoding="utf-8")
-    (wt / ".git").write_text(f"gitdir: {(fake / 'worktrees' / wt.name).as_posix()}\n", encoding="utf-8")
+    _point(wt / ".git", fake / "worktrees" / wt.name)
     assert gitops.commit_all(wt, "task")
     assert not marker.exists()
     assert gitops.git(repo, "log", "-1", "--format=%s", br).stdout.strip() == "task"     # the real repository
@@ -184,7 +190,7 @@ def test_after_a_restart_a_planted_integration_pointer_is_refused(tmp_path, monk
     fake, integ = tmp_path / "fake.git", home / "projects" / "1" / "integration"
     shutil.copytree(repo / ".git", fake)
     (fake / "worktrees" / "integration" / "commondir").write_text(str(fake), encoding="utf-8")
-    (integ / ".git").write_text(f"gitdir: {(fake / 'worktrees' / 'integration').as_posix()}\n", encoding="utf-8")
+    _point(integ / ".git", fake / "worktrees" / "integration")
     with pytest.raises(gitops.GitError, match="does not point into the repository's own git folder"):
         gitops.ensure_integration(home, str(repo), 1)
     assert gitops._PIN == {}
@@ -237,7 +243,7 @@ def test_after_a_restart_a_planted_task_worktree_pointer_is_refused_on_first_use
     shutil.copytree(repo / ".git", fake)
     exec(_plant_code(fake / "config", wt, marker))
     (fake / "worktrees" / wt.name / "commondir").write_text(str(fake), encoding="utf-8")
-    (wt / ".git").write_text(f"gitdir: {(fake / 'worktrees' / wt.name).as_posix()}\n", encoding="utf-8")
+    _point(wt / ".git", fake / "worktrees" / wt.name)
     with pytest.raises(gitops.GitError, match="does not point into the repository's own git folder"):
         gitops.commit_all(wt, "task")
     assert not marker.exists()
@@ -275,7 +281,6 @@ def test_a_run_started_in_another_repo_after_the_plant_never_adopts_or_replants_
     assert gitops.commit_all(wtb, "task") and not marker.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
 def test_the_put_back_file_gets_the_baseline_mode_not_the_agents(tmp_path):
     """Review R3 of 3d423b40: an agent that also ran chmod does not keep its mode."""
     repo, _home, wt, _br = _setup(tmp_path)
@@ -283,7 +288,7 @@ def test_the_put_back_file_gets_the_baseline_mode_not_the_agents(tmp_path):
     cfg.chmod(0o644)
     code = f"import os; p = {str(cfg)!r}; open(p, 'a').write('#x\\n'); os.chmod(p, 0o666)"
     assert not gitops.run_check(wt, [sys.executable, "-c", code])[0]
-    assert cfg.stat().st_mode & 0o777 == 0o644
+    assert cfg.stat().st_mode & 0o777 == (0o644 if os.name != "nt" else cfg.stat().st_mode & 0o777)    # no POSIX modes
 
 
 def test_an_oserror_from_the_agent_run_itself_is_not_reported_as_a_put_back_failure(tmp_path):
