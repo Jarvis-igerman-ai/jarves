@@ -83,15 +83,29 @@ def _at_rest(text: str) -> str:
     return text
 
 
-# #1526: what the scrub keeps of an older error / note: JARVES's own fixed reasons, cap notes or a WHOLE code-shaped
-# value (what privacy mode writes); anything else becomes "failed". No token is ever cut out of free text (fail closed).
-_OWN = frozenset({
-    "failed", "tool not available (switched off or removed)", "the owner did not approve this step",
-    "text written by others was read earlier in this plan: resume to continue",
-    "no approval was given for this step (no answer in time or nowhere to ask)", "the step timed out",
-    "the step timed out: it may already have happened", "the step failed unexpectedly", "interrupted by a restart",
-    "paused by the owner", "cancelled by the owner", "interrupted by a restart: resume when ready",
-    "the daily AI budget is used up", "the arguments are too long to show in full for your approval; shorten the step"})
+class _R:
+    """#1526: JARVES's own fixed step errors / plan notes. ONE source: every writer below stores these constants and
+    the scrub keeps exactly them (_OWN), so a new reason cannot drift out of the keep-list."""
+    FAILED = "failed"
+    NO_TOOL = "tool not available (switched off or removed)"
+    NOT_APPROVED = "the owner did not approve this step"
+    TAINTED = "text written by others was read earlier in this plan: resume to continue"
+    NO_ANSWER = "no approval was given for this step (no answer in time or nowhere to ask)"
+    TIMED_OUT = "the step timed out"
+    TIMED_OUT_MAYBE = "the step timed out: it may already have happened"
+    CRASHED = "the step failed unexpectedly"
+    RESTARTED = "interrupted by a restart"
+    PAUSED = "paused by the owner"
+    CANCELLED = "cancelled by the owner"
+    RESTARTED_PLAN = "interrupted by a restart: resume when ready"
+    NO_BUDGET = "the daily AI budget is used up"
+    TOO_LONG = "the arguments are too long to show in full for your approval; shorten the step"
+
+
+# #1526: what the scrub keeps of an older error / note: a _R reason, a cap note or a WHOLE code-shaped value (what
+# privacy mode writes); anything else becomes "failed" (error) or "" (note). No token is cut out of free text.
+# The ONLY formatted notes are the two cap notes (_CAP, written by _run) and "step N: <error>" (_STEP, _block/_fail).
+_OWN = frozenset(v for k, v in vars(_R).items() if k.isupper())
 _CAP = re.compile(r"time cap of \d+ min reached|cost cap of \d+ AI requests reached")
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{2,39}")
 _STEP = re.compile(r"(step \d+): (.*)", re.S)
@@ -105,7 +119,7 @@ def _result_text(steps) -> str:
 
 def _private_error(text: object) -> str:
     t = str(text or "")
-    return t if not t or t in _OWN or _CAP.fullmatch(t) or _CODE.fullmatch(t) else "failed"
+    return t if not t or t in _OWN or _CAP.fullmatch(t) or _CODE.fullmatch(t) else _R.FAILED
 
 
 def _private_note(text: object) -> str:
@@ -248,7 +262,7 @@ class PlanStore:
         p = self._plan(pid)
         if p["state"] not in ("ready", "running"):
             raise ValueError("only a ready or running plan can be paused")
-        self._cas(pid, ("ready", "running"), "paused", note="paused by the owner")
+        self._cas(pid, ("ready", "running"), "paused", note=_R.PAUSED)
         logs.info("goals", "PLAN_PAUSED", "plan paused", id=pid, by=by)
         return self.get(pid)
 
@@ -271,7 +285,7 @@ class PlanStore:
             raise ValueError("this plan is already finished")
         self._cas(pid, (*OPEN, "failed"), "cancelled",           # #813: any cancellable state, never a done/cancelled one
                   (("UPDATE goal_plan_steps SET status='skipped' WHERE plan_id=? AND status IN ('pending','blocked','unknown')",
-                    (int(pid),)),), note="cancelled by the owner", finished=self.clock())
+                    (int(pid),)),), note=_R.CANCELLED, finished=self.clock())
         logs.info("goals", "PLAN_CANCELLED", "plan cancelled", id=pid, by=by)
         return self.get(pid)
 
@@ -337,10 +351,10 @@ class PlanStore:
         n = 0
         for p in self.db.rows("SELECT id FROM goal_plans WHERE state='running'"):
             sql = tuple(("UPDATE goal_plan_steps SET status=?, error=? WHERE id=? AND status='running'",
-                         ("unknown", "interrupted by a restart", s["id"]) if s["consequential"] else ("pending", "", s["id"]))
+                         ("unknown", _R.RESTARTED, s["id"]) if s["consequential"] else ("pending", "", s["id"]))
                         for s in self.db.rows("SELECT * FROM goal_plan_steps WHERE plan_id=? AND status='running'", (p["id"],)))
             try:                                         # #813: a cancel that landed after the read wins
-                self._cas(p["id"], ("running",), "paused", sql, note="interrupted by a restart: resume when ready")
+                self._cas(p["id"], ("running",), "paused", sql, note=_R.RESTARTED_PLAN)
             except ValueError:
                 continue
             n += 1
@@ -352,8 +366,10 @@ class PlanStore:
         """#1526: privacy mode keeps no tool text, also in rows written before it was on. ONE transaction over the two
         plan tables (rolled back whole on any error) on its OWN short-lived connection with secure_delete on: the shared
         connection's lock is never held, so the event loop never waits on it, and a writer elsewhere makes BEGIN fail
-        after `busy_s` into the runner's backoff. A done plan's result is rebuilt as privacy mode writes it. Returns the
-        rows changed. An in-memory database has no file to scrub (0)."""
+        after `busy_s` into the runner's backoff. All rows are read, then written with two executemany calls. A done
+        plan's result is rebuilt as privacy mode writes it; any other plan's result is blanked. After the commit a
+        PASSIVE checkpoint (never waits) copies the scrubbed pages into the database file. Returns the rows changed.
+        An in-memory database has no file to scrub (0)."""
         if self.db.path == ":memory:":
             return 0
         c = sqlite3.connect(self.db.path, timeout=busy_s)
@@ -367,24 +383,28 @@ class PlanStore:
             except BaseException:
                 c.rollback()
                 raise
+            c.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()
         finally:
             c.close()
         return n
 
     @staticmethod
     def _scrub_rows(c) -> int:
-        n = 0
-        for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps").fetchall():
+        steps, by_plan, up_s, up_p = c.execute("SELECT id, plan_id, idx, tool, status, evidence, error FROM goal_plan_steps "
+                                               "ORDER BY plan_id, idx").fetchall(), {}, [], []
+        for r in steps:
+            by_plan.setdefault(r["plan_id"], []).append({"idx": r["idx"], "tool": r["tool"], "status": r["status"], "evidence": ""})
             new = ("", _private_error(r["error"]))
             if new != (r["evidence"] or "", r["error"] or ""):
-                n += c.execute("UPDATE goal_plan_steps SET evidence=?, error=? WHERE id=?", (*new, r["id"])).rowcount
-        for r in c.execute("SELECT id, result, note FROM goal_plans").fetchall():
-            result = _result_text(c.execute("SELECT idx, tool, status, evidence FROM goal_plan_steps WHERE plan_id=? "
-                                            "ORDER BY idx", (r["id"],)).fetchall()) if r["result"] else ""
-            new = (result, _private_note(r["note"]))
+                up_s.append((*new, r["id"]))
+        for r in c.execute("SELECT id, state, result, note FROM goal_plans").fetchall():
+            done = r["state"] == "done" and r["result"]
+            new = (_result_text(by_plan.get(r["id"], [])) if done else "", _private_note(r["note"]))
             if new != (r["result"] or "", r["note"] or ""):
-                n += c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (*new, r["id"])).rowcount
-        return n
+                up_p.append((*new, r["id"]))
+        c.executemany("UPDATE goal_plan_steps SET evidence=?, error=? WHERE id=?", up_s)
+        c.executemany("UPDATE goal_plans SET result=?, note=? WHERE id=?", up_p)
+        return len(up_s) + len(up_p)
 
 
 MAX_ATTEMPTS = 3
@@ -482,8 +502,14 @@ class PlanRunner:
             return
         seen = _PLAIN[0]
         if self._scrubbed != seen and self.mono() >= self._retry_at:
-            self._scrub_task = asyncio.ensure_future(asyncio.to_thread(self.store.scrub_private))
+            self._scrub_task = asyncio.ensure_future(asyncio.to_thread(self._timed_scrub))
             self._scrub_task.seen = seen
+
+    def _timed_scrub(self) -> tuple[int, int]:
+        """Worker thread: the scrub and its duration in ms (real monotonic time, PLAN_SCRUBBED shows the lock time)."""
+        t0 = time.monotonic()
+        n = self.store.scrub_private()
+        return n, round((time.monotonic() - t0) * 1000)
 
     def _scrub_done(self, t: asyncio.Future) -> None:
         if t.cancelled():
@@ -491,8 +517,9 @@ class PlanRunner:
         e = t.exception()
         if e is None:
             self._scrubbed, self._wait, self._warned = t.seen, 0.0, False
-            if t.result():
-                logs.info("goals", "PLAN_SCRUBBED", "older plan text scrubbed for privacy mode", count=t.result())
+            n, ms = t.result()
+            if n:
+                logs.info("goals", "PLAN_SCRUBBED", "older plan text scrubbed for privacy mode", count=n, ms=ms)
             return
         self._wait = min(max(2.0, 2 * self._wait), 300.0)
         self._retry_at = self.mono() + self._wait
@@ -585,19 +612,19 @@ class PlanRunner:
                     self._stop_plan(pid, "blocked", f"cost cap of {p['max_ai']} AI requests reached")
                     return st.get(pid)
                 if self.budget.remaining("ai_requests") < 1:
-                    self._stop_plan(pid, "blocked", "the daily AI budget is used up")
+                    self._stop_plan(pid, "blocked", _R.NO_BUDGET)
                     return st.get(pid)
             tool = self.registry.get(step["tool"])
             if tool is None:
-                self._block(pid, step, "tool not available (switched off or removed)")
+                self._block(pid, step, _R.NO_TOOL)
                 return st.get(pid)
             consequential = tool.permission != "read"
             if consequential and p["tainted"]:
-                self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
+                self._block(pid, step, _R.TAINTED)
                 return st.get(pid)
             if consequential and not tool.confirm and tool.permission != "destructive":
                 if _shown_len(step["args"]) > STEP_SHOW_CHARS:         # checked on the ESCAPED text: it can be 6x longer
-                    self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
+                    self._block(pid, step, _R.TOO_LONG)
                     return st.get(pid)
                 ok = await self.registry.ask(
                     f"Plan '{_show_text(p['title'], MAX_TITLE)}', step {step['idx'] + 1}/{len(st.steps(pid))}: {_show_text(step['tool'], 80)} "
@@ -606,7 +633,7 @@ class PlanRunner:
                     why=(_show_text(step["why"], MAX_WHY) or "A step of a plan you approved.")
                     + (" It was tried before and may already have happened: check first." if step["attempts"] else ""))
                 if not ok:
-                    self._block(pid, step, "the owner did not approve this step")
+                    self._block(pid, step, _R.NOT_APPROVED)
                     return st.get(pid)
                 p = st._plan(pid)
                 if p["state"] != "running":                   # cancelled / paused while the popup was open
@@ -622,14 +649,14 @@ class PlanRunner:
                 res = await asyncio.wait_for(self.registry.call(step["tool"], step["args"], origin="model"),
                                              min(remaining, tool.timeout_s + STEP_GRACE_S))
             except (asyncio.TimeoutError, TimeoutError):
-                self._fail(pid, step, "the step timed out" + (": it may already have happened" if consequential else ""), t0,
+                self._fail(pid, step, _R.TIMED_OUT_MAYBE if consequential else _R.TIMED_OUT, t0,
                            status="unknown" if consequential else "failed")
                 return st.get(pid)
             except asyncio.CancelledError:
                 raise                                          # shutdown: the step stays 'running' for recover()
             except Exception:
                 logs.error("goals", "PLAN_STEP_CRASH", "plan step raised", tool=step["tool"], exc=True)
-                self._fail(pid, step, "the step failed unexpectedly", t0)
+                self._fail(pid, step, _R.CRASHED, t0)
                 return st.get(pid)
             ran = self.clock() - t0
             st.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=?", (max(0.0, ran), pid))
@@ -642,19 +669,19 @@ class PlanRunner:
                 continue
             if res.code == "TOOL_UNTRUSTED_TURN":
                 st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
-                self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
+                self._block(pid, step, _R.TAINTED)
                 return st.get(pid)
             if res.code in ("NOT_APPROVED", "APPROVAL_REFUSED", "TOOL_NOT_CONFIRMED", "TOOL_DECLINED"):
-                self._block(pid, step, "the owner did not approve this step")
+                self._block(pid, step, _R.NOT_APPROVED)
                 return st.get(pid)
             if res.code in ("TOOL_APPROVAL_TIMEOUT", "TOOL_APPROVAL_UNAVAILABLE"):     # V5 sec F8: nothing ran; retry after resume
-                self._block(pid, step, "no approval was given for this step (no answer in time or nowhere to ask)")
+                self._block(pid, step, _R.NO_ANSWER)
                 return st.get(pid)
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
-                self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
+                self._fail(pid, step, _R.TIMED_OUT_MAYBE, t0, evidence=res.message, status="unknown")
                 return st.get(pid)
             msg = _at_rest(_short(res.message, 120))
-            code = str(res.code or "") or "failed"                  # never a stored "None"
+            code = str(res.code or "") or _R.FAILED                  # never a stored "None"
             self._fail(pid, step, f"{code}: {msg}" if msg else code, t0, evidence=res.message)
             return st.get(pid)
 

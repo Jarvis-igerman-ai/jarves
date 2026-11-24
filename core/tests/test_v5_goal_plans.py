@@ -840,26 +840,51 @@ async def test_1526_review_r3_scrub_result_matches_finish_for_a_long_plan(env, m
     assert len(cut) - len("12/12 steps done. ") == gp.RESULT_CHARS and cut.endswith("…")   # same cap as _finish
 
 
-def test_1526_review_r2_every_fixed_reason_a_writer_stores_survives_the_scrub():
-    """Drift guard: each literal reason/note the plan code stores (call args, note=..., recover) is in _OWN."""
-    import ast
-    import inspect
-    found = set()
-    for n in ast.walk(ast.parse(inspect.getsource(gp))):
-        if not isinstance(n, ast.Call):
-            continue
-        name = getattr(n.func, "attr", getattr(n.func, "id", ""))
-        args = n.args[2:3] if name in ("_block", "_fail", "_stop_plan") else []
-        args += [k.value for k in n.keywords if k.arg == "note"]
-        for a in args:
-            if isinstance(a, ast.Constant) and isinstance(a.value, str):
-                found.add(a.value)
-            elif isinstance(a, ast.BinOp) and isinstance(a.left, ast.Constant):          # "x" + (": y" if c else "")
-                found |= {a.left.value + e.value for e in (a.right.body, a.right.orelse)}
-    found.discard("")
-    assert len(found) >= 10 and found | {"interrupted by a restart"} <= gp._OWN
-    for r in found:
-        assert gp._private_error(r) == r and gp._private_note(f"step 1: {r}") == f"step 1: {r}"
+_REASONS = sorted(v for k, v in vars(gp._R).items() if k.isupper())
+_CAPS = ["time cap of 30 min reached", "cost cap of 20 AI requests reached"]
+
+
+@pytest.mark.parametrize("writer,why", [(w, r) for w in ("_block", "_fail") for r in _REASONS]
+                         + [("_stop_plan", r) for r in _REASONS + _CAPS])
+def test_1526_doctor_r4_r5_every_writer_reason_survives_the_scrub(env, writer, why):
+    """Behavioural: each fixed reason, stored by the real writer, is kept by the scrub (step error and plan note)."""
+    p = env.store.propose("p", steps(("fake_read", {"text": "x"})))
+    env.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (p["id"],))
+    step = env.store.steps(p["id"])[0]
+    r = env.runner
+    {"_block": lambda: r._block(p["id"], step, why), "_fail": lambda: r._fail(p["id"], step, why, env.clock()),
+     "_stop_plan": lambda: r._stop_plan(p["id"], "blocked", why)}[writer]()
+    before = env.store.get(p["id"])
+    assert why in (before["note"], before["steps"][0]["error"])
+    env.store.scrub_private()
+    after = env.store.get(p["id"])
+    assert (after["note"], after["steps"][0]["error"]) == (before["note"], before["steps"][0]["error"])
+
+
+async def test_1526_doctor_r3_only_a_done_plan_result_is_rebuilt(env, monkeypatch):
+    a, b = await _old_text_plans(env, monkeypatch)
+    env.db.x("UPDATE goal_plans SET result='SECRET result' WHERE id=?", (b,))      # a non-done plan with a result
+    env.store.scrub_private()
+    assert env.store.get(b)["result"] == "" and env.store.get(a)["result"] == "1/1 steps done. 1. fake_read: done"
+
+
+async def test_1526_doctor_r1_scrub_checkpoints_scrubbed_pages_into_the_db_file(env, monkeypatch):
+    from pathlib import Path
+    await _old_text_plans(env, monkeypatch)
+    env.db.x("PRAGMA wal_checkpoint(TRUNCATE)")                                 # the old text is in the database file
+    assert b"it broke" in Path(env.db.path).read_bytes()
+    env.store.scrub_private()
+    assert b"it broke" not in Path(env.db.path).read_bytes()          # tool output; args are not scrubbed
+
+
+async def test_1526_doctor_r2_plan_scrubbed_logs_its_duration(env, monkeypatch):
+    logged = []
+    await _old_text_plans(env, monkeypatch)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    monkeypatch.setattr(gp.logs, "info", lambda *a, **k: logged.append((a[1], k)))
+    await _tick(env)
+    hit = [k for c, k in logged if c == "PLAN_SCRUBBED"]
+    assert hit and hit[0]["count"] == 4 and isinstance(hit[0]["ms"], int) and hit[0]["ms"] >= 0
 
 
 async def test_1526_review_r3_fail_never_stores_a_bare_tool_message(env, monkeypatch):
