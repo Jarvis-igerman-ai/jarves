@@ -69,6 +69,87 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+# (#1390) config keys whose value is a command git runs: filters on checkout/add/merge, merge drivers on a merge,
+# diff drivers and diff.external on a diff, whenever a .gitattributes or `.git/info/attributes` entry names them
+_DRIVER_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process|required)|merge\.(.+)\.driver"
+                         r"|diff\.(.+)\.(command|textconv)|diff\.external)$", re.S)
+_SUBMODULE_KEY = re.compile(r"^submodule\.(.+)\.[^.]+$", re.S)
+_SHARED_SCOPES = ("local", "worktree")      # the repository's own config: agents can write it through `.git`
+MIN_GIT = (2, 31)                           # GIT_CONFIG_COUNT/KEY/VALUE: older git ignores them (fails open)
+_GIT_OK: list[bool] = []                    # the version check passed once in this process
+
+
+def _run(cwd: str | Path, *argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=30,
+                          creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                          errors="replace")
+
+
+def require_git(cwd: str | Path) -> None:
+    """GitError below git 2.31: the overrides below would be silently ignored there. Checked once per process."""
+    if _GIT_OK:
+        return
+    m = re.search(r"(\d+)\.(\d+)", _run(cwd, "version").stdout or "")
+    if not m or (int(m.group(1)), int(m.group(2))) < MIN_GIT:
+        raise GitError(f"JARVES needs git {MIN_GIT[0]}.{MIN_GIT[1]} or later (found: {m.group(0) if m else '?'})")
+    _GIT_OK.append(True)
+
+
+def _pairs(out: str) -> list[tuple[str, str]]:
+    parts = (out or "").split("\0")
+    return [(scope, entry.split("\n", 1)[0]) for scope, entry in zip(parts[0::2], parts[1::2])]
+
+
+def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
+    """Command-scope overrides (GIT_CONFIG_COUNT/KEY/VALUE env, git 2.31+: any subsection name, `=` included, is
+    safe) that blank every driver command the repository's shared config names, include.path/includeIf files
+    included (#1390). A blank filter is a pass-through (required=false); a blank merge driver fails the merge (it
+    conflicts, so a local `merge.<x>.driver`, even a harmless one, now always aborts merge_in); a blank diff driver
+    fails the command, so git() adds --no-ext-diff --no-textconv to its own diff/show/log calls. The system and
+    global config (the owner's own) stay as they are. A filter the shared config names that the owner's config also
+    defines (Git LFS after `git lfs install --local`) raises GitError: a silent pass-through would commit binaries
+    instead of pointers. Every submodule named in any config or `.gitmodules` gets ignore=dirty, so status, diff and
+    merge never look inside its work tree (gitlink commit changes still show). Fails closed: an unreadable config
+    raises GitError."""
+    require_git(cwd)
+    p = _run(cwd, "config", "--show-scope", "-z", "--get-regexp", r"^(filter|merge|diff|submodule)\.")
+    if p.returncode not in (0, 1):                                        # 1: no key matched (or not a repository)
+        raise GitError(f"cannot read the shared git config: {(p.stderr or '').strip()}"[:300])
+    entries = _pairs(p.stdout)
+    if (Path(cwd) / ".gitmodules").is_file():                            # agent-written content: names only
+        g = _run(cwd, "config", "-f", ".gitmodules", "-z", "--get-regexp", r"^submodule\.")
+        if g.returncode not in (0, 1):
+            raise GitError(f"cannot read .gitmodules: {(g.stderr or '').strip()}"[:300])
+        entries += [("gitmodules", e.split("\n", 1)[0]) for e in (g.stdout or "").split("\0") if e]
+    keys: dict[str, str] = {}
+    owner_filters: set[str] = set()
+    shared_filters: set[str] = set()
+    for scope, key in entries:
+        sm, m = _SUBMODULE_KEY.match(key), _DRIVER_KEY.match(key)
+        if sm:
+            keys[f"submodule.{sm.group(1)}.ignore"] = "dirty"
+        elif not m:
+            continue
+        elif scope not in _SHARED_SCOPES:
+            if m.group(2) is not None:
+                owner_filters.add(m.group(2))
+        elif m.group(2) is not None:                                      # every command of that filter, not one
+            shared_filters.add(m.group(2))
+            keys.update({f"filter.{m.group(2)}.{k}": "" for k in ("clean", "smudge", "process")})
+            keys[f"filter.{m.group(2)}.required"] = "false"
+        else:
+            keys[key] = ""
+    clash = sorted(owner_filters & shared_filters)
+    if clash:
+        raise GitError(f"the repository's own git config redefines your filter {clash[0]!r}; JARVES will not run "
+                       "git here (remove the repository-level filter keys, e.g. `git config --local "
+                       f"--remove-section filter.{clash[0]}`)"[:300])
+    env = {"GIT_CONFIG_COUNT": str(len(keys))} if keys else {}
+    for i, (k, v) in enumerate(keys.items()):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    return env
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
@@ -76,13 +157,26 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. Commands named in the shared config by filter/merge/diff drivers are
+    blanked (#1390, see shared_config_overrides); the editors are `:`; submodules are never recursed into or
+    checked for changes. `args` must start with the subcommand: any global option (-C, --git-dir, --exec-path...)
+    could run git elsewhere than the repository whose config was read. Not covered: gpg.program, core.sshCommand,
+    core.askPass, credential helpers, transport commands (remote.<x>.uploadpack/receivepack, ext:: URLs),
+    core.alternateRefsCommand, config-defined hooks (`hook.<name>.command`), and a key added between the config
+    read and the command (one read per call)."""
+    if args and args[0].startswith("-"):
+        raise GitError(f"git() takes the subcommand first, not the global option {args[0].split('=', 1)[0]}")
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "submodule.recurse=false", "-c", "diff.ignoreSubmodules=dirty"]
+    env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":",
+                     **shared_config_overrides(cwd)})
+    if args[:1] in (("diff",), ("show",), ("log",)):   # a blank diff driver fails these; the flags show plain text
+        args = (args[0], "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", *args[1:])
+    elif args[:1] == ("status",):
+        args = ("status", "--ignore-submodules=dirty", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
@@ -165,7 +259,11 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
 
 
 def commit_all(wt: Path, message: str) -> bool:
-    git(wt, "add", "-A")
+    """`add -A` checks every populated submodule for changes, which runs that submodule's own (agent-writable)
+    filters whatever ignore says (#1390): gitlinks are left out (an agent may not change them anyway)."""
+    links = [e.split("\t", 1)[1] for e in git(wt, "ls-files", "-s", "-z").stdout.split("\0")
+             if e.startswith("160000 ") and "\t" in e]
+    git(wt, "add", "-A", "--", ".", *(f":(exclude,literal){x}" for x in links))
     if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
     git(wt, "commit", "-m", message[:200], "--no-verify")
