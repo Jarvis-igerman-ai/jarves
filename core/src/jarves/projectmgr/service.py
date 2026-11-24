@@ -922,10 +922,21 @@ class Manager(StageEngine):
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
+            try:
+                shallow = gitops.shallow_state(p["path"])
+            except (OSError, subprocess.SubprocessError, gitops.GitError) as e:
+                return _res(False, "GIT_ERROR", f"cannot read the shallow state of {p['path']}: {e}"[:300])
             if not yes and not self._approve(f"Merge {br} at commit {tip[:12]} into {st['branch']} in {p['path']}? "
                                              "(no push)", "project_ship",
                                              {"project": p["name"], "branch": st["branch"], "commit": tip}):
                 return _res(False, "NOT_APPROVED", "not merged")
+            try:            # `.git/shallow` cuts history and moves the merge base behind the approval (#1727 R1)
+                moved = gitops.shallow_state(p["path"]) != shallow
+            except (OSError, subprocess.SubprocessError, gitops.GitError):
+                moved = True
+            if moved:
+                return _res(False, "SHALLOW_CHANGED", "the repository's shallow history changed while you were asked "
+                            "(`.git/shallow`): nothing merged, run ship again")
             conflicts = gitops.merge_in(Path(p["path"]), tip, ident=False,     # your own git identity / signing
                                         message=f"Merge branch '{br}' at commit {tip[:12]}")
             if conflicts:

@@ -664,6 +664,24 @@ def test_ship_merges_the_approved_commit_even_when_an_agent_adds_a_replace_ref(e
     assert msg.strip() == f"Merge branch 'jarves/p1/integration' at commit {tip[:12]}"
 
 
+def test_ship_refuses_when_an_agent_makes_the_repository_shallow_during_the_approval(env):
+    """#1727 review R1: a commit listed in `.git/shallow` has no parents for git, so the merge base and the three-way
+    ship merge change behind the approved commit. Ship compares the shallow file before and after the approval."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    tip = sh(home / "projects" / "1" / "integration", "git", "rev-parse", "HEAD").strip()
+
+    def ask(prompt, **kw):                      # the agent cuts the history while the owner reads the prompt
+        (repo / ".git" / "shallow").write_text(tip + "\n")
+        return True
+    m._ask = ask
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["code"] == "SHALLOW_CHANGED" and not (repo / "a.txt").exists()
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)

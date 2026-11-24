@@ -2,6 +2,7 @@
 own git calls. An agent can write `.git/config`, an included file and `.git/info/attributes` (no commit needed)."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -338,6 +339,9 @@ def test_a_shared_ssh_default_key_command_never_runs(tmp_path):
 def test_ignoring_grafts_adds_no_git_warning(tmp_path):
     """#1727 review R3: GIT_GRAFT_FILE is a path below a file that cannot exist (`/dev/null/no-grafts` on POSIX, below
     kernel32.dll on Windows); git reads history without a grafts or "unable to access" warning (also on Windows CI)."""
+    assert os.path.exists(gitops.NO_HOOKS) and not os.path.isdir(gitops.NO_HOOKS)       # #1727 R4: a file
+    with pytest.raises(NotADirectoryError):
+        open(gitops.GIT_ENV["GIT_GRAFT_FILE"], encoding="utf-8")
     repo = _repo(tmp_path)
     p = gitops.git(repo, "rev-list", "HEAD")
     assert p.stdout.strip() and p.stderr == ""
@@ -352,6 +356,18 @@ def test_the_owners_signer_stays_under_either_openpgp_name(tmp_path, _owner_home
     env = gitops.shared_config_overrides(repo)
     got = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
     assert got["gpg.openpgp.program"] == "mysigner"
+
+
+def test_a_shared_default_key_command_falls_back_to_the_owners_own(tmp_path, _owner_home):
+    """#1727 review R2: a shared gpg.ssh.defaultKeyCommand becomes the owner's global one when set, else HOOK_NOOP."""
+    repo = _repo(tmp_path)
+    _cfg(repo, "gpg.ssh.defaultKeyCommand", "evil")
+    env = gitops.shared_config_overrides(repo)
+    assert env["GIT_CONFIG_VALUE_0"] == gitops.HOOK_NOOP and env["GIT_CONFIG_KEY_0"] == "gpg.ssh.defaultkeycommand"
+    _cfg(repo, "--global", "gpg.ssh.defaultKeyCommand", "ssh-add -L")
+    env = gitops.shared_config_overrides(repo)
+    got = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert got["gpg.ssh.defaultkeycommand"] == "ssh-add -L"
 
 
 def _git_has_config_hooks(tmp: Path) -> bool:

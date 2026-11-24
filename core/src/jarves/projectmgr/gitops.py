@@ -76,9 +76,10 @@ _DRIVER_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process|required)|merge
 _SUBMODULE_KEY = re.compile(r"^submodule\.(.+)\.[^.]+$", re.S)
 _HOOK_KEY = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)
 HOOK_NOOP = "git version"   # a config hook's command (#1407): git puts itself on its children's PATH, on Windows too
-# (#1407) signing programs: a shared-config value is replaced by the owner's global/system one (either name of the
-# openpgp pair, which git treats as one setting, #1727 R2), else git's default. A key command becomes HOOK_NOOP: it
-# prints no `key::` line, so ssh signing without user.signingKey fails cleanly and nothing else is run (#1727 R3).
+# (#1407) signing programs, gpg.ssh.defaultKeyCommand included: a shared-config value is replaced by the owner's
+# global/system one (either name of the openpgp pair, which git treats as one setting, #1727 R2), else by the default
+# here. The key command's default is HOOK_NOOP: it prints no `key::` line, so ssh signing without user.signingKey
+# fails cleanly and nothing else is run (#1727 R3).
 _PROGRAMS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
              "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": HOOK_NOOP}
 _ALIAS = {"gpg.program": "gpg.openpgp.program", "gpg.openpgp.program": "gpg.program"}
@@ -183,7 +184,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     checked for changes. `args` must start with the subcommand: any global option (-C, --git-dir, --exec-path...)
     could run git elsewhere than the repository whose config was read. Shared-config gpg programs are replaced by
     the owner's own, config hooks (`hook.<name>.command`, any scope) run HOOK_NOOP, and replace refs and grafts
-    are ignored (#1407, GIT_ENV). Not covered: core.sshCommand, core.askPass, credential helpers, transport
+    are ignored (#1407, GIT_ENV). Not covered: `.git/shallow` (agent-writable; it cuts history, so a merge base can
+    move; ship refuses when it changes during the approval, see shallow_state), core.sshCommand, core.askPass, credential helpers, transport
     commands (remote.<x>.uploadpack/receivepack, ext:: URLs), core.alternateRefsCommand, and a key added between
     the config read and the command (one read per call, #1533)."""
     if args and args[0].startswith("-"):
@@ -384,6 +386,17 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
         return False, f"check could not start: {e}"
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
+
+
+def shallow_state(path: str | Path) -> bytes | None:
+    """The bytes of the repository's `shallow` file (None: not shallow). Agents can write it; git treats each commit
+    listed there as having no parents, so a merge base can change. Pinning GIT_SHALLOW_FILE would break real shallow
+    clones, so ship compares this before and after the owner's approval (#1727 R1)."""
+    rel = git(path, "rev-parse", "--git-path", "shallow").stdout.strip()
+    try:
+        return (Path(path) / rel).read_bytes()
+    except FileNotFoundError:
+        return None
 
 
 def repo_state(path: str) -> dict:
