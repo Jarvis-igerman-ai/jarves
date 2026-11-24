@@ -26,7 +26,7 @@ gate runs from the checked-out tree, so it cannot protect against a commit that 
    concrete verified build and not a pending one; and the gate keeps running without his click.
 4. **Order of work (do not reverse):** (a) merge the workflow change; (b) the owner adds the two secrets as ENVIRONMENT secrets; (c) the owner
    deletes the repository-level secrets of the same names (RELEASING step 4); (d) the owner runs one dry-run dispatch and one tag test with a
-   throwaway tag in a fork-free way (step 5).
+   throwaway tag in a fork-free way (RELEASING step 6).
 
 ## Tests to add with the change (`core/tests/test_ci_workflows.py`)
 

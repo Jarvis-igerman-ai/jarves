@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -206,6 +207,51 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
+SSH_KEYGEN = "/usr/bin/ssh-keygen"         # absolute: PATH cannot redirect the verifier (ubuntu release runner)
+# a whole annotated tag object: header naming a commit + tag name, message, and ONE trailing SSH signature (nothing after)
+SIGNED_TAG_RE = re.compile(rb"(object ([0-9a-f]{40}|[0-9a-f]{64})\ntype commit\ntag ([^\n]+)\n.*?)"
+                           rb"(-----BEGIN SSH SIGNATURE-----\n[A-Za-z0-9+/=\n]*-----END SSH SIGNATURE-----\n)", re.S)
+
+
+def tag_signature_problems(root: Path, tag: str, sha: str, signers: str, rows_hash: str | None,
+                           run=subprocess.run) -> list[str]:
+    """#605: the tag's 'Rows hash' is out of band only when the tag object is SSH-signed by a key in the owner's
+    allowed-signers lines, points at the gated commit and its SIGNED part carries that hash. git config is not used:
+    the object is read with `git cat-file` and the signature checked by ssh-keygen over the exact signed bytes."""
+    env = {**os.environ, "GIT_NO_REPLACE_OBJECTS": "1", "LC_ALL": "C"}           # no refs/replace substitution
+    with tempfile.TemporaryDirectory() as d:
+        listed, sig = Path(d) / "allowed_signers", Path(d) / "tag.sig"
+        listed.write_text(signers.strip() + "\n", encoding="utf-8")
+        try:
+            ref = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}"], cwd=root, capture_output=True, timeout=60, env=env)
+            body = run(["git", "cat-file", "tag", ref.stdout.decode().strip()], cwd=root, capture_output=True,
+                       timeout=60, env=env) if ref.returncode == 0 else ref
+            m = SIGNED_TAG_RE.fullmatch(body.stdout or b"") if body.returncode == 0 else None
+            if not m:
+                return [f"sign-off: {tag[:40]} is not an owner-signed annotated tag (sign it: git tag -s vX.Y.Z -m "
+                        "'Rows hash: <sha256>'; nothing may follow the signature)"]
+            sig.write_bytes(m.group(4))
+            who = run([SSH_KEYGEN, "-Y", "find-principals", "-s", str(sig), "-f", str(listed)],
+                      capture_output=True, timeout=60, env=env)
+            principal = (who.stdout or b"").decode("utf-8", "replace").splitlines()[:1]
+            ok = who.returncode == 0 and principal and run(
+                [SSH_KEYGEN, "-Y", "verify", "-f", str(listed), "-I", principal[0], "-n", "git", "-s", str(sig)],
+                input=m.group(1), capture_output=True, timeout=60, env=env).returncode == 0
+        except (OSError, subprocess.SubprocessError) as e:      # no git/ssh-keygen, timeout: refuse, never pass blind
+            return [f"sign-off: cannot verify the signature of tag {tag[:40]} ({type(e).__name__}); refused"]
+    if not ok:
+        return [f"sign-off: the tag {tag[:40]} is not signed by the owner's key (RELEASE_ALLOWED_SIGNERS); refused"]
+    if m.group(3).decode("utf-8", "replace") != tag or m.group(2).decode() != sha.strip().lower():
+        return [f"sign-off: the signed tag {tag[:40]} points at {m.group(2).decode()[:12]} (named "
+                f"{m.group(3).decode('utf-8', 'replace')[:40]!r}), not at the gated commit {sha.strip()[:12]}; refused"]
+    h = re.search(rb"^Rows hash: ([0-9a-f]{64})", m.group(1), re.M | re.I)     # same first-match rule as release.yml
+    signed = h.group(1).decode().lower() if h else "none"
+    if rows_hash is not None and signed != rows_hash.strip().lower():
+        return [f"sign-off: the rows hash in the signed tag ({signed[:12]}) differs from the one given "
+                f"({rows_hash.strip()[:12]}); refused"]
+    return []
+
+
 # ---------------------------------------------------------------------- git + GitHub (not used by the tests)
 def git_is_ancestor(root: Path):
     def f(a: str, b: str) -> bool:
@@ -338,9 +384,20 @@ def main(argv: list[str] | None = None) -> int:
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
                         changed_files=git_changed(root), issues=issues, installer_sha=installer,
                         expect_rows_hash=a.expect_rows_hash)
+    signers = os.environ.get("JARVES_ALLOWED_SIGNERS", "").strip()
+    # vars.* falls back to a repository/organization variable; the no-environment `signers-fallback` job reports
+    # exactly "false" only when none exists. Anything else: the list is not the owner's environment value (#605).
+    if signers and os.environ.get("JARVES_SIGNERS_FALLBACK", "") == "false":
+        problems += tag_signature_problems(root, a.tag, a.sha, signers, a.expect_rows_hash)
+    elif a.require_rows_hash:
+        problems.append("sign-off: the tag signature cannot be verified: RELEASE_ALLOWED_SIGNERS must be set as a "
+                        "stable-release environment variable only (no repository/organization variable of that name); "
+                        "see docs/RELEASING.md")
+    else:
+        print("note: tag signature not checked (no trusted RELEASE_ALLOWED_SIGNERS list); a real publish refuses (#605)")
     if a.expect_rows_hash is None and a.require_rows_hash:
         problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
-                        "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
+                        "'Rows hash: <sha256>' (git tag -s vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
                         "`jarvis release signoff --finish`)")
     elif a.expect_rows_hash is None:
         print("note: no out-of-band rows hash given (annotated tag message 'Rows hash: <sha256>'); the sheet hash alone "
