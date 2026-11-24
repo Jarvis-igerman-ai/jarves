@@ -152,35 +152,63 @@ async def test_registry_hands_approval_meta_and_handler_the_same_args_instance()
     assert len(seen) == 2 and seen[0] is seen[1]
 
 
-@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
+NODE = pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
+STATIC = Path(prefs_mod.__file__).parent / "dashboard_static"
+PAGE_PROBE = """
+const words = JSON.parse(process.argv[3]); let gets = 0, out = [];
+global.window = {}; global.PAGES = {}; global.JL = {t: (s) => s}; global.tx = (he, en) => en;
+global.el = (tag, attrs, ...kids) => ({tag, attrs: attrs || {}, kids: kids.flat(), textContent: "", addEventListener() {}});
+global.pill = global.header = (...a) => a;
+const text = (n) => n.textContent || (n.kids || []).filter((k) => typeof k === "string").join("");
+const kids = (n) => n.kids || (Array.isArray(n) ? n : []);
+const find = (n, f) => !n || typeof n !== "object" ? null : f(n) ? n : kids(n).map((k) => find(k, f)).find(Boolean) || null;
+const walk = (n, f, row) => { if (!n || typeof n !== "object") return;
+  if (n.attrs && n.attrs.class === "card") { const b = find(n, (x) => x.tag === "b"); row = b ? b.kids[0] : "page"; }
+  f(n, row); kids(n).forEach((k) => walk(k, f, row)); };
+let confirm; const renders = [];
+global.render = (...nodes) => { renders.push(nodes);
+  walk(nodes, (n) => { if (n.tag === "button" && n.kids[0] === "Confirm, remember it" && !confirm) confirm = n; }); };
+global.api = async (path, opts) => {
+  if (!opts) return {proposed: words[gets++].map(([id, t]) => ({id, text: t, topic: "other"})), items: [], declined: [], topics: ["other"]};
+  const e = new Error("changed"); e.code = process.argv[2]; throw e; };
+global.route = () => PAGES.preferences();
+require(process.argv[1]);
+(async () => { await PAGES.preferences(); await confirm.attrs.onclick(); await new Promise((r) => setTimeout(r, 10));
+  renders.forEach((nodes) => walk(nodes, (n, row) => { if (n.tag === "b") out.push(n.kids[0]);
+    if (n.attrs && n.attrs.role === "status" && text(n)) out.push("note:" + text(n) + "@" + row); }));
+  console.log(JSON.stringify(out)); })();"""
+
+
+def _page(code, words):
+    out = subprocess.run(["node", "-e", PAGE_PROBE, str(STATIC / "pillars.js"), code, json.dumps(words)],
+                         capture_output=True, text=True, timeout=30, check=False)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@NODE
 @pytest.mark.parametrize("code, reloads", [("PREF_CONFLICT", True), ("PREF_TEXT_REQUIRED", True), ("OTHER", False)])
 def test_dashboard_page_re_renders_with_the_new_wording_after_a_stale_confirm(code, reloads):
-    """Review R1 (#1740): after 409/400 the page re-fetches /api/prefs at once and keeps the note; other errors stay put."""
-    static = Path(prefs_mod.__file__).parent / "dashboard_static"
-    probe = """
-    const words = ["A", "B"]; let gets = 0, shown = [];
-    global.window = {}; global.PAGES = {}; global.JL = {t: (s) => s}; global.tx = (he, en) => en;
-    global.el = (tag, attrs, ...kids) => ({tag, attrs: attrs || {}, kids: kids.flat(), textContent: "", addEventListener() {}});
-    global.pill = global.header = (...a) => a;
-    const walk = (n, f) => { if (n && typeof n === "object") { f(n); (n.kids || (Array.isArray(n) ? n : [])).forEach((k) => walk(k, f)); } };
-    global.render = (...nodes) => walk(nodes, (n) => { if (n.tag === "b") shown.push(n.kids[0]);
-      if (n.attrs && n.attrs.role === "status" && n.textContent) shown.push("note:" + n.textContent); });
-    global.api = async (path, opts) => {
-      if (!opts) return {proposed: [{id: 1, text: words[gets++], topic: "other"}], items: [], declined: [], topics: ["other"]};
-      const e = new Error("changed"); e.code = process.argv[2]; throw e; };
-    global.route = () => PAGES.preferences();
-    require(process.argv[1]);
-    (async () => {
-      let confirm; global.render = ((r) => (...n) => { walk(n, (x) => { if (x.tag === "button" && x.kids[0] === "Confirm, remember it") confirm = x; }); r(...n); })(global.render);
-      await PAGES.preferences(); await confirm.attrs.onclick(); await new Promise((r) => setTimeout(r, 10));
-      console.log(JSON.stringify(shown));
-    })();"""
-    out = subprocess.run(["node", "-e", probe, str(static / "pillars.js"), code], capture_output=True, text=True,
-                         timeout=30, check=False)
-    assert out.returncode == 0, out.stderr
-    assert json.loads(out.stdout) == (["A", "note:Failed: changed", "B"] if reloads else ["A"])     # 2nd render: note, then B
+    """Review R1 (#1740): after 409/400 the page re-fetches /api/prefs at once; other errors stay on the page message."""
+    got = _page(code, [[[1, "A"], [2, "C"]], [[1, "B"], [2, "C"]]])
+    assert got == (["A", "C", "B", "note:Failed: changed@B", "C"] if reloads else ["note:Failed: changed@page", "A", "C"])
 
 
+@NODE
+def test_dashboard_stale_confirm_note_goes_to_the_confirmed_row_or_the_page_if_it_is_gone():
+    """Review R2 (13e8a27): the note is keyed by preference id, not given to the first status span of the next render."""
+    assert _page("PREF_CONFLICT", [[[1, "A"], [2, "C"]], [[2, "C"]]]) == ["A", "C", "note:Failed: changed@page", "C"]
+
+
+@NODE
 def test_dashboard_api_errors_carry_the_server_code():
-    app = (Path(prefs_mod.__file__).parent / "dashboard_static" / "app.js").read_text(encoding="utf-8")
-    assert "err.code = data.code" in app                  # pillars.js re-renders on PREF_CONFLICT / PREF_TEXT_REQUIRED
+    """Review R1 (13e8a27): the real api() of app.js, with a stubbed fetch, puts the server's code on the error."""
+    probe = """
+    const src = require("fs").readFileSync(process.argv[1], "utf8");
+    const api = new Function("fetch", "window", src.slice(src.indexOf("async function api("), src.indexOf("\\nconst usd")) + "; return api;")(
+      async () => ({ok: false, statusText: "Conflict", json: async () => ({error: "changed", code: "PREF_CONFLICT"})}), {});
+    api("/api/prefs/op", {method: "POST"}).then(() => console.log("no error"), (e) => console.log(e.message + "|" + e.code));"""
+    out = subprocess.run(["node", "-e", probe, str(STATIC / "app.js")], capture_output=True, text=True, timeout=30,
+                         check=False)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "changed|PREF_CONFLICT"

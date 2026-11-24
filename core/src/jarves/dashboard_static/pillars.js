@@ -5,15 +5,16 @@
 "use strict";
 
 (function () {
-  // #1514: these refusals mean the page shows old wording: re-render it at once and carry the note to the new page
-  const RELOAD = ["PREF_CONFLICT", "PREF_TEXT_REQUIRED"];
-  let carried = "";
-  const msgSpan = () => { const s = el("span", { class: "muted small", role: "status" }); s.textContent = carried; carried = ""; return s; };
+  const msgSpan = () => el("span", { class: "muted small", role: "status" });
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
-  async function act(msg, fn) {
+  // #1514: these refusals mean a preference row shows old wording: re-render at once, the note goes to THAT row
+  const RELOAD = ["PREF_CONFLICT", "PREF_TEXT_REQUIRED"];
+  let carried = null;                                   // {id, note} for the next render of the preferences page
+  async function act(msg, fn, rowId) {
     try { await fn(); route(true); } catch (e) {
       const note = tx("נכשל: ", "Failed: ") + JL.t(e.message);
-      if (RELOAD.includes(e.code)) { carried = note; route(true); } else msg.textContent = note;
+      if (rowId !== undefined && RELOAD.includes(e.code)) { carried = { id: rowId, note: note }; route(true); }
+      else msg.textContent = note;
     }
   }
   const WAITING = () => tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");
@@ -104,7 +105,9 @@
   async function pagePreferences() {
     const d = await api("/api/prefs");
     const msg = msgSpan();
-    const op = (id, o, extra) => act(msg, () => post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {})));
+    const note = carried; carried = null;              // shown on its own row; the page message if the row is gone
+    if (note && !d.proposed.concat(d.items, d.declined).some((p) => p.id === note.id)) msg.textContent = note.note;
+    const op = (id, o, extra) => act(msg, () => post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {})), id);
     const text = el("input", { type: "text", dir: "auto", maxlength: "200", style: "min-width:260px;flex:1", "aria-label": tx("העדפה חדשה", "New preference"),
       placeholder: tx("העדפה שתרצה שאזכור", "A preference you want remembered") });
     const topic = el("select", { "aria-label": tx("נושא", "Topic") }, d.topics.map((t) => el("option", { value: t }, topicText(t))));
@@ -118,7 +121,8 @@
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, el("b", { dir: "auto" }, p.text), pill("plain", topicText(p.topic)),
         p.stale ? pill("degraded", tx("לא אושרה מחדש זמן רב", "Not reaffirmed for a long time")) : null),
       p.evidence ? el("div", { class: "muted small", dir: "auto" }, tx("מה שאמרת: ", "What you said: ") + p.evidence) : null,
-      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" }, buttons));
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" }, buttons),
+      note && note.id === p.id ? el("div", { class: "muted small", role: "status" }, note.note) : null);
     const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
     const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => op(p.id, "confirm", { text: p.text }), "primary"),
       btn(tx("עריכה", "Edit"), edit(p)), btn(tx("לא לזכור", "Do not remember"), () => op(p.id, "decline"))]));
