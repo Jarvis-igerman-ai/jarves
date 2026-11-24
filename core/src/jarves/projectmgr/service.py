@@ -924,7 +924,7 @@ class Manager(StageEngine):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
             if not yes and not self._approve(f"Merge {br} at commit {tip[:12]} into {st['branch']} in {p['path']}? "
                                              "(no push)", "project_ship",
-                                             {"project": p["name"], "branch": st["branch"], "commit": tip[:12]}):
+                                             {"project": p["name"], "branch": st["branch"], "commit": tip}):
                 return _res(False, "NOT_APPROVED", "not merged")
             conflicts = gitops.merge_in(Path(p["path"]), tip, ident=False,     # your own git identity / signing
                                         message=f"Merge branch '{br}' at commit {tip[:12]}")

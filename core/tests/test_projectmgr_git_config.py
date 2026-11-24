@@ -332,11 +332,51 @@ def test_a_shared_ssh_default_key_command_never_runs(tmp_path):
     gitops.git(repo, "add", "f.txt")
     p = gitops.git(repo, "commit", "-qm", "s", "-S", check=False, ident=False)
     assert p.returncode != 0 and not marker.exists(), p.stderr
+    assert "BUG" not in p.stderr and "returned no keys" in p.stderr          # #1727 R3: the clean failure path
 
 
 def test_ignoring_grafts_adds_no_git_warning(tmp_path):
-    """#1727 review R3: GIT_GRAFT_FILE points at /dev/null (POSIX) or a path below kernel32.dll (Windows); git must
-    read history there without an "unable to access" warning (the Windows CI shards run this)."""
+    """#1727 review R3: GIT_GRAFT_FILE is a path below a file that cannot exist (`/dev/null/no-grafts` on POSIX, below
+    kernel32.dll on Windows); git reads history without a grafts or "unable to access" warning (also on Windows CI)."""
     repo = _repo(tmp_path)
     p = gitops.git(repo, "rev-list", "HEAD")
     assert p.stdout.strip() and p.stderr == ""
+
+
+def test_the_owners_signer_stays_under_either_openpgp_name(tmp_path, _owner_home):
+    """#1727 review R2: gpg.program and gpg.openpgp.program are one setting in git. A shared value under one name
+    falls back to the owner's value under the other name, not to plain `gpg`."""
+    repo = _repo(tmp_path)
+    _cfg(repo, "--global", "gpg.program", "mysigner")
+    _cfg(repo, "gpg.openpgp.program", "evil")
+    env = gitops.shared_config_overrides(repo)
+    got = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+    assert got["gpg.openpgp.program"] == "mysigner"
+
+
+def _git_has_config_hooks(tmp: Path) -> bool:
+    probe = tmp / "probe"
+    subprocess.run(["git", "init", "-q", str(probe)], check=True)
+    p = subprocess.run(["git", "-c", "hook.p.command=echo probe-ran", "-c", "hook.p.event=pre-commit", "hook", "run",
+                        "pre-commit"], cwd=probe, capture_output=True, text=True)
+    return "probe-ran" in p.stdout + p.stderr
+
+
+def test_a_config_hook_never_runs_from_jarves_git_calls(tmp_path):
+    """#1727 review R5: a runtime check of the HOOK_NOOP override, `=` in the hook name included. Where git has config
+    hooks (`hook.<name>.command`), a plain `git commit` first proves the hooks run (positive control); CI's git 2.43
+    has none, so there the test only shows that the overrides do not break a commit (no skip: skips fail the run)."""
+    has_hooks = _git_has_config_hooks(tmp_path)
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    for name in ("plain", "a=b.c"):
+        _cfg(repo, f"hook.{name}.command", _sh(marker, "true"))
+        _cfg(repo, "--add", f"hook.{name}.event", "pre-commit")
+    if has_hooks:
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c", "--allow-empty"],
+                       cwd=repo, check=True)
+        assert marker.exists()
+        marker.unlink()
+    (repo / "f.txt").write_text("hooked?\n", encoding="utf-8")
+    gitops.git(repo, "add", "f.txt")
+    gitops.git(repo, "commit", "-qm", "h")
+    assert not marker.exists()

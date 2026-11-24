@@ -615,7 +615,7 @@ def test_ship_approval_names_the_commit_and_merges_only_that_commit(env):
         return True
     m._ask = ask
     assert m.call("ship_plan", project="demo", apply=True)["ok"]
-    assert tip[:12] in seen[0][0] and seen[0][1]["commit"] == tip[:12]
+    assert tip[:12] in seen[0][0] and seen[0][1]["commit"] == tip   # #1727 R1: full SHA
     assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
 
 

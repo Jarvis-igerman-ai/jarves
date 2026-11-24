@@ -75,10 +75,13 @@ _DRIVER_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process|required)|merge
                          r"|diff\.(.+)\.(command|textconv)|diff\.external)$", re.S)
 _SUBMODULE_KEY = re.compile(r"^submodule\.(.+)\.[^.]+$", re.S)
 _HOOK_KEY = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)
-# (#1407) signing programs: a shared-config value is replaced by the owner's global/system one, else git's default
-_PROGRAMS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-             "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
 HOOK_NOOP = "git version"   # a config hook's command (#1407): git puts itself on its children's PATH, on Windows too
+# (#1407) signing programs: a shared-config value is replaced by the owner's global/system one (either name of the
+# openpgp pair, which git treats as one setting, #1727 R2), else git's default. A key command becomes HOOK_NOOP: it
+# prints no `key::` line, so ssh signing without user.signingKey fails cleanly and nothing else is run (#1727 R3).
+_PROGRAMS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+             "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": HOOK_NOOP}
+_ALIAS = {"gpg.program": "gpg.openpgp.program", "gpg.openpgp.program": "gpg.program"}
 # (#1407) replace refs and `.git/info/grafts` are agent-writable and swap the tree/history behind an approved commit.
 # The graft file is a path below a file that cannot exist (ENOTDIR/ENOENT: git neither reads nor warns; a readable
 # empty file would print the "grafts is deprecated" hint on every call, #1727 R3). git 2.31-2.41 let a shared
@@ -144,7 +147,8 @@ def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
             keys[f"hook.{hk.group(1)}.command"] = HOOK_NOOP
         elif key.lower() in _PROGRAMS:
             if scope in _SHARED_SCOPES:
-                keys[key.lower()] = owner_programs.get(key.lower(), _PROGRAMS[key.lower()])
+                k = key.lower()
+                keys[k] = owner_programs.get(k, owner_programs.get(_ALIAS.get(k, ""), _PROGRAMS[k]))
         elif not m:
             continue
         elif scope not in _SHARED_SCOPES:
