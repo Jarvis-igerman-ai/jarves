@@ -8,7 +8,9 @@ import contextlib
 import fnmatch
 import os
 import re
+import itertools
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -71,8 +73,8 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        _guard: bool = True) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
@@ -81,15 +83,15 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
     config-defined hooks (`hook.<name>.command`, newer git) are covered by the shared-file guard below (#1533)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
-    pin = _PIN.get(_key(cwd))
-    common = pin[1] if pin else _COMMON.get(_key(cwd))
-    why = _guard_git(common) if common else ""
+    pin = _pin_of(cwd)
+    common = pin[1] if pin else _find_common(cwd) if _guard and (_GUARDS or _LAST) else None
+    why = _guard_git(common) if common and _guard else ""
     if why:
         if check:
             raise GitError(why)
         return subprocess.CompletedProcess(["git", *args], 1, "", why)
     env = child_env({"GIT_TERMINAL_PROMPT": "0", **({"GIT_DIR": pin[0], "GIT_COMMON_DIR": pin[1],
-                                                       "GIT_WORK_TREE": str(cwd)} if pin else {})})
+                                                       "GIT_WORK_TREE": pin[2]} if pin else {})})
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
@@ -101,54 +103,107 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     return p
 
 
-# #1533: shared files in the repository's common git folder that every worktree (and the owner's checkout) reads.
-# An agent, or a check running its code, that writes them could name a command (filter/merge driver, config hook)
-# that git runs for JARVES or later for the owner; no git option skips them. While any agent run or check is active
-# in a repository, JARVES keeps ONE baseline of them: before every JARVES git command there and when each run ends, a
-# change is put back (temp file + os.replace; the rejected bytes are kept in a new, never reused
-# `<name>.jarves-rejected-<random>` file) and fails every run active at that moment. After the last run the files as
-# it left them stay the reference: a later change (a left-behind process, or your own edit) is never reverted, but
-# JARVES git refuses to run there until JARVES restarts. A deleted file names no command and is ignored. JARVES's own
-# git never writes them (`worktree add --no-track`). The worktree's `.git` / `commondir` pointers are read once, when
-# JARVES creates (or, after a restart, first opens) the worktree; every later JARVES git command there runs with
-# GIT_DIR/GIT_COMMON_DIR, so a planted pointer to a fake git folder is never followed. Still open (UNVERIFIED): a
-# write between this check and git's own read, and a baseline taken after a restart.
+# #1533: shared files that every JARVES git command reads: the repository's common git folder and the owner's
+# user-level git config/attributes (an agent runs as the same user, review R1). An agent, or a check running its
+# code, that writes them could name a command (filter/merge driver, config hook) that git runs for JARVES or later for
+# the owner; no git option skips them. While any agent run or check is active in a repository, JARVES keeps ONE
+# baseline of them: before every JARVES git command there and when each run ends, a change is put back (temp file +
+# os.replace, the file mode kept; the rejected bytes go to a new `<name>.jarves-rejected-<time>-<n>-<random>` file,
+# the newest KEEP_REJECTED per file are kept) and fails every run active at that moment. After the last run, a later
+# change (a left-behind process, or your own edit) is never reverted: one that adds or changes a key git may run
+# (COMMAND_KEY), or any change to an attributes file, makes JARVES git refuse to run there until JARVES restarts;
+# other config edits (`git remote add`, `push -u`) are accepted. A deleted file names no command and is ignored.
+# JARVES's own git never writes them (`worktree add --no-track`). The worktree's `.git` / `commondir` pointers are read
+# once, when JARVES creates (or, after a restart, first opens and checks) the worktree; every later JARVES git command
+# there, or in a folder below it, runs with GIT_DIR/GIT_COMMON_DIR, so a planted pointer is never followed. Still
+# open (UNVERIFIED): a write between this check and git's own read; a baseline taken after a restart; the system
+# config (admin-owned) and a custom `core.attributesFile` path.
 SHARED_GIT = ("config", "config.worktree", "info/attributes")
+CONFIG_NAMES = ("config", "config.worktree", ".gitconfig")
+COMMAND_KEY = re.compile(
+    r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\.external|diff\..+\.(command|textconv)|hook\..+|"
+    r"gpg\..*program|gpg\.ssh\.defaultkeycommand|core\.(sshcommand|editor|pager|askpass|fsmonitor|hookspath|"
+    r"attributesfile|worktree|gitproxy)|credential\..*|include\..*|includeif\..*|alias\..*|pager\..*|"
+    r"sequence\.editor|.*\.(command|cmd|program|helper|driver|textconv|uploadpack|receivepack))$", re.IGNORECASE)
 REJECTED = ".jarves-rejected-"
+KEEP_REJECTED = 5
+_SEQ = itertools.count()
 _GUARDS: dict[str, list] = {}           # common dir -> [the `changed` lists of the active runs, {file: bytes or None}]
 _LAST: dict[str, dict] = {}             # common dir -> the files as the last run left them
 _GUARD_LOCK = threading.RLock()
-_PIN: dict[str, tuple[str, str]] = {}   # JARVES worktree -> (its git dir, the common dir), read when it was made
-_COMMON: dict[str, str] = {}            # repository folder -> its common dir
+_PIN: dict[str, tuple[str, str, str]] = {}  # JARVES worktree -> (its git dir, the common dir, the worktree)
+_COMMON: dict[str, str] = {}            # folder -> its common dir
 
 
 def _key(path: str | Path) -> str:
     return os.path.normcase(os.path.realpath(str(path)))
 
 
+def _pin_of(cwd: str | Path) -> tuple[str, str, str] | None:
+    """The pin of `cwd` or of the JARVES worktree it lies in (review R2)."""
+    k = _key(cwd)
+    return _PIN.get(k) or next((v for w, v in list(_PIN.items()) if k.startswith(w + os.sep)), None)
+
+
 def _pin(repo: str, wt: Path) -> None:
+    """Pin `wt` only if it points into `repo`'s own common git folder (review R3)."""
     _PIN.pop(_key(wt), None)
-    out = git(wt, "rev-parse", "--absolute-git-dir", "--git-common-dir").stdout.splitlines()
-    common = _key(Path(wt) / out[1].strip())
-    _PIN[_key(wt)] = (out[0].strip(), common)
+    _COMMON.pop(_key(wt), None)
+    out = git(wt, "rev-parse", "--absolute-git-dir", "--git-common-dir", _guard=False).stdout.splitlines()
+    gd, common = out[0].strip(), _key(Path(wt) / out[1].strip())
+    own = _key(Path(repo) / git(repo, "rev-parse", "--git-common-dir").stdout.strip())
+    if common != own or _key(Path(gd).parent) != _key(Path(own) / "worktrees"):
+        raise GitError(f"the worktree {wt} does not point into the repository's own git folder; JARVES does not use "
+                       "it (#1533)")
+    _PIN[_key(wt)] = (gd, common, os.path.realpath(str(wt)))
     _COMMON[_key(repo)] = common
 
 
 def common_dir(cwd: str | Path) -> str | None:
-    """The repository's common git folder (normalised); None outside a repository."""
-    known = _PIN.get(_key(cwd), ("", _COMMON.get(_key(cwd))))[1]
-    if known:
-        return known
+    """The repository's common git folder (normalised, cached); None outside a repository."""
+    pin = _pin_of(cwd)
+    if pin or _key(cwd) in _COMMON:
+        return pin[1] if pin else _COMMON[_key(cwd)]
     try:
-        p = git(cwd, "rev-parse", "--git-common-dir", check=False)
+        p = git(cwd, "rev-parse", "--git-common-dir", check=False, _guard=False)
     except (OSError, subprocess.SubprocessError):
         return None
-    return _key(Path(cwd) / p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+    if p.returncode != 0 or not p.stdout.strip():
+        return None
+    return _COMMON.setdefault(_key(cwd), _key(Path(cwd) / p.stdout.strip()))
+
+
+def _find_common(cwd: str | Path) -> str | None:
+    """Without running git: the common dir of the repository `cwd` lies in, as git would find it (review R2)."""
+    d = Path(os.path.realpath(str(cwd)))
+    for p in (d, *d.parents):
+        g = p / ".git"
+        try:
+            if g.is_dir():
+                return _key(g)
+            if g.is_file():
+                gd = p / g.read_text(encoding="utf-8", errors="replace").partition("gitdir:")[2].strip()
+                cd = gd / "commondir"
+                return _key(gd / cd.read_text(encoding="utf-8", errors="replace").strip()) if cd.is_file() else _key(gd)
+        except OSError:
+            return None
+    return None
+
+
+def _user_files() -> set[Path]:
+    """The user-level git config and attributes, where git finds them for JARVES (the same HOME/XDG_CONFIG_HOME)."""
+    home = Path(os.environ.get("HOME") or Path.home())
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "git"
+    return {home / ".gitconfig", xdg / "config", xdg / "attributes"}
 
 
 def _shared(common: str) -> set[Path]:
     c = Path(common)
-    return {c / n for n in SHARED_GIT} | set(c.glob("worktrees/*/config.worktree"))
+    return {c / n for n in SHARED_GIT} | set(c.glob("worktrees/*/config.worktree")) | _user_files()
+
+
+def _name(common: str, f: Path) -> str:
+    return f.relative_to(common).as_posix() if f.is_relative_to(common) else f.as_posix()
 
 
 def _read(f: Path) -> bytes | None:
@@ -162,17 +217,48 @@ def _differ(common: str, snap: dict) -> list[Path]:
     return [f for f in sorted(set(snap) | _shared(common)) if (now := _read(f)) is not None and now != snap.get(f)]
 
 
+def _commands(data: bytes | None) -> set[bytes] | None:
+    """The `key\\nvalue` entries of config text whose key git may run; None if git cannot parse it."""
+    if not data:
+        return set()
+    p = subprocess.run(["git", "config", "-z", "--file", "-", "--list"], input=data, capture_output=True,
+                       timeout=30, creationflags=_NOWIN, env=child_env(), cwd=tempfile.gettempdir())
+    if p.returncode != 0:
+        return None
+    return {e for e in p.stdout.split(b"\0") if COMMAND_KEY.match(e.partition(b"\n")[0].decode("utf-8", "replace"))}
+
+
+def _late(common: str, snap: dict) -> list[str]:
+    """Shared files changed after the last run that may make git run a command; harmless edits join `snap` (R4)."""
+    bad = []
+    for f in sorted(set(snap) | _shared(common)):
+        now = _read(f)
+        if now is None or now == snap.get(f):
+            continue
+        new, old = (_commands(now), _commands(snap.get(f))) if f.name in CONFIG_NAMES else (None, None)
+        if new is not None and old is not None and new <= old:
+            snap[f] = now
+        else:
+            bad.append(_name(common, f))
+    return bad
+
+
 def _put_back(f: Path, old: bytes | None) -> None:
-    fd, keep = tempfile.mkstemp(dir=f.parent, prefix=f.name + REJECTED)     # O_EXCL: never overwrites a kept copy
+    prefix = f"{f.name}{REJECTED}{time.time_ns():020d}-{next(_SEQ):08d}-"     # sorts oldest first, even in one tick
+    fd, _keep = tempfile.mkstemp(dir=f.parent, prefix=prefix)                  # O_EXCL: never overwrites a kept copy
     with os.fdopen(fd, "wb") as h:
         h.write(f.read_bytes())
+    for extra in sorted(f.parent.glob(f.name + REJECTED + "*"))[:-KEEP_REJECTED]:
+        extra.unlink(missing_ok=True)
     if old is None:
         f.unlink()
         return
+    mode = stat.S_IMODE(f.stat().st_mode)
     fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=f".{f.name}.", suffix=".jarves")
     try:
         with os.fdopen(fd, "wb") as h:
             h.write(old)
+        os.chmod(tmp, mode)
         os.replace(tmp, f)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -188,7 +274,7 @@ def _restore(common: str) -> list[str]:
     g, names = _GUARDS[common], []
     for f in _differ(common, g[1]):
         _put_back(f, g[1].get(f))
-        names.append(f.relative_to(common).as_posix())
+        names.append(_name(common, f))
     for run in g[0]:
         run.extend(n for n in names if n not in run)
     return names
@@ -201,8 +287,7 @@ def _guard_git(common: str) -> str:
             if common in _GUARDS:
                 names = _restore(common)
                 return f"a running agent or check {tamper_text(names)}" if names else ""
-            late = [f.relative_to(common).as_posix() for f in _differ(common, _LAST.get(common) or {})] \
-                if common in _LAST else []
+            late = _late(common, _LAST[common]) if common in _LAST else []
         except OSError as e:
             return f"the shared git files could not be checked or put back: {e}"
     return (f"the shared git files ({', '.join(late[:5])}) changed after the last agent run or check ended; JARVES "
