@@ -86,7 +86,8 @@ def status(path: str, repo: str = "") -> dict:
     try:
         gitops.require_git(path)
     except (gitops.GitError, OSError, subprocess.SubprocessError) as e:
-        return {"git": False, "git_error": str(e)[:200], "gh": bool(gh_cmd()), "signed_in": False, "repo": ""}
+        return {"git": False, "git_error": str(e)[:200], "gh": bool(gh_cmd()), "signed_in": False,
+                "repo": repo if valid_repo(repo) else ""}
     out = {"git": True, "gh": bool(gh_cmd()), "signed_in": False, "repo": repo if valid_repo(repo) else "",
            "origin": repo_slug(path)}
     if out["gh"]:
@@ -121,7 +122,8 @@ def push_branch(path: str, branch: str, repo: str) -> None:
     core.sshCommand, credential helpers, gpg...). So git push runs in a fresh JARVES-made bare repository that borrows
     the project's objects (alternates): only the owner's system/global config applies, and nothing the project config
     adds later reaches the push. The one value read from it, origin's URL, must be a github.com https/ssh URL of the
-    recorded `repo` (#1622: an agent could point origin at another github.com repository).
+    recorded `repo` (#1622: an agent could point origin at another github.com repository). Not covered: a rewrite
+    (insteadOf/pushInsteadOf) in the user-global config, which agents can also write, still applies to the push: #1748.
     Afterwards refs/remotes/origin/<branch> is set locally, best effort (the branch is already pushed); no
     `reference-transaction` hook runs there, as gitops.git pins core.hooksPath to NO_HOOKS on the command line."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
