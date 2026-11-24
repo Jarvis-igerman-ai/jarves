@@ -120,3 +120,15 @@ def test_an_unreadable_shared_config_fails_closed(tmp_path):
         f.write("[broken\n")
     with pytest.raises(gitops.GitError, match="shared git config"):
         gitops.git(repo, "status")
+
+
+def test_editors_named_in_the_shared_config_never_run(tmp_path):
+    """#1390: `core.editor` / `sequence.editor` run on any JARVES git call that opens a message; the editor is `:`."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _cfg(repo, "core.editor", _sh(marker, "true"))
+    subprocess.run(["git", "commit", "--amend", "--no-verify"], cwd=repo, check=True, capture_output=True,
+                   env=gitops.child_env())                                         # no GIT_EDITOR from the host
+    assert marker.exists()                                                         # the setup itself works
+    marker.unlink()
+    gitops.git(repo, "commit", "--amend", "--no-verify")
+    assert not marker.exists()
