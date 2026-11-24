@@ -95,15 +95,24 @@
   }
 
   // ------------------------------------------------------------- Learned preferences
+  let prefNote = "";
   async function pagePreferences() {
+    const note = prefNote;
+    prefNote = "";                  // taken before the GET: a failed reload never leaves it for a later visit
     const d = await api("/api/prefs");
     const msg = msgSpan();
+    msg.textContent = note;
     const op = (id, o, extra) => act(msg, () => post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {})));
     const text = el("input", { type: "text", dir: "auto", maxlength: "200", style: "min-width:260px;flex:1", "aria-label": tx("העדפה חדשה", "New preference"),
       placeholder: tx("העדפה שתרצה שאזכור", "A preference you want remembered") });
     const topic = el("select", { "aria-label": tx("נושא", "Topic") }, d.topics.map((t) => el("option", { value: t }, topicText(t))));
     const add = () => text.value.trim() && act(msg, () => post("/api/prefs", { text: text.value, topic: topic.value }));
     text.addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
+    // #1514: the wording changed after this page showed it: reload so the owner sees the new words, and say why
+    const confirmIt = (p) => act(msg, () => post("/api/prefs/op", { op: "confirm", id: p.id, text: p.text }).catch((e) => {
+      if (e.code !== "PREF_CONFLICT" && e.code !== "PREF_TEXT_REQUIRED") throw e;
+      prefNote = tx("נכשל: ", "Failed: ") + JL.t(e.message);       // act() reloads the page; the note survives it
+    }));
     const edit = (p) => () => {
       const t = window.prompt(tx("ניסוח ההעדפה", "Preference wording"), p.text);
       if (t && t.trim()) op(p.id, "edit", { text: t });
@@ -114,7 +123,7 @@
       p.evidence ? el("div", { class: "muted small", dir: "auto" }, tx("מה שאמרת: ", "What you said: ") + p.evidence) : null,
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" }, buttons));
     const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
-    const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => op(p.id, "confirm"), "primary"),
+    const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => confirmIt(p), "primary"),
       btn(tx("עריכה", "Edit"), edit(p)), btn(tx("לא לזכור", "Do not remember"), () => op(p.id, "decline"))]));
     const items = d.items.map((p) => row(p, [btn(tx("עריכה", "Edit"), edit(p)),
       p.stale ? btn(tx("אישור מחדש", "Reaffirm"), () => op(p.id, "reaffirm"), "primary") : null,
