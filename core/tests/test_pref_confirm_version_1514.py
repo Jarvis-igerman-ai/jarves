@@ -93,3 +93,38 @@ async def test_voice_confirm_handler_that_was_never_shown_the_wording_does_not_c
     tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
     r = await tool.handler(tool.args(id=pid))                            # no approval step ran (nothing was shown)
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
+
+
+async def test_voice_confirm_through_a_plain_confirm_callback_binds_and_confirms_the_current_wording(home):
+    """Review R1: a confirm(prompt) callback without `accepts_meta` still binds the wording before the ask."""
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(A, "I said so", "voice")["item"]["id"]
+    reg, prompts = SkillRegistry(), []
+
+    async def plain(prompt):                         # no **meta, no accepts_meta
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            p.edit(pid, B, by="phone", repropose=True)
+        return True
+    reg.confirm = plain
+    reg.register(prefs_mod.make_skill(p))
+    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert not r.ok and r.code == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert r.ok and len(prompts) == 2 and p.for_prompt() == [B]
+
+
+async def test_a_max_length_preference_confirms_on_dashboard_and_voice(home):
+    """Review R2: every writer clamps to MAX_TEXT, so the [:MAX_TEXT] copy both paths send matches the stored words."""
+    long_a = ("word " * prefs_mod.MAX_TEXT)[:prefs_mod.MAX_TEXT + 50]
+    pid = _proposed(home, long_a)
+    ctx = dashboard.Ctx(home, Config())
+    p = prefs_mod._ctx(ctx)
+    shown = prefs_mod.api_prefs(ctx, None, None)[1]["proposed"][0]["text"]
+    assert len(shown) <= prefs_mod.MAX_TEXT
+    assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": shown})[0] == 200
+    p.edit(pid, "x" + long_a, by="phone", repropose=True)                 # stored clamped again, now proposed
+    assert p.get(pid)["state"] == "proposed"
+    r = await _registry(p, lambda meta: True).call("pref_confirm", {"id": pid}, origin="model")
+    assert r.ok and p.get(pid)["state"] == "confirmed"
