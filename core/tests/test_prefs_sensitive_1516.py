@@ -23,7 +23,7 @@ SAFE = [
     "use base64urlencoded strings for the payload",
     "run the sha256checksumfile step before release",
     "commit d8d6def4 merged",
-    "fix a3f9c2e1b7d4f6a8c0e2b4d6f8a1c3e5b7d9f0a2",  # 40-char git SHA
+    "fix commit a3f9c2e1b7d4f6a8c0e2b4d6f8a1c3e5b7d9f0a2",  # 40-char git SHA (#1099 R1: bare "fix <hex>" is refused)
     "I prefer short answers in the morning",
     "internationalization",                           # long word, no digits
     "call getOtpSecret4Value in the handler",        # seed word only inside the run itself (review R1)

@@ -11,6 +11,7 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
 
@@ -68,9 +69,59 @@ def _base32(text: str) -> bool:
     return False
 
 
-def looks_sensitive(text: str) -> bool:
-    text = text or ""
-    return bool(_SENSITIVE.search(text)) or _base32(text)
+# #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
+# "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
+# English key words are whole words ("_" may precede them: my_api_key, client_secret; "api keyboard" is no key word).
+_KEY_WORD = (r"(?<![A-Za-z])(?:(?:api|access|secret|private)[\s_-]*keys?|secrets?|tokens?)\b|"
+             r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
+_KEY_VALUE = re.compile(
+    # "keyword: value" / "keyword = value" with at most two words between
+    rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
+    # after a spoken "is/was/הוא/היא/זה" (up to five words after the keyword, a bare "key" included) the value must
+    # look like a credential: 6+ characters with a digit or a non-hyphen symbol ("expired", "well-known" stay allowed)
+    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
+    r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}", re.I)
+# An unprefixed key is a long run of mixed letters and digits with high character entropy, scored whole (separators
+# _ - / dropped) unless every part is word-like (identifiers, UUIDs, paths). camelCase names built from words are not
+# keys. Hex of 32+ chars is an HMAC/API key, except a 40-char SHA right after a git word ("revert commit 9fceb02...").
+_KEY_TOKEN = re.compile(r"[A-Za-z0-9+=/_-]{20,}")
+_HEX = re.compile(r"[0-9a-fA-F]+")
+HEX_KEY_LEN = 32
+# only git words that name a commit (#1099 review R1: fix/rev/reset/checkout also precede keys in plain speech)
+_COMMIT_CTX = re.compile(r"\b(?:commit|sha1?|revert|cherry-pick|bisect)\W*$", re.I)
+_CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
+_WORDY = re.compile(r"[A-Z]?[a-z]+|[A-Z]+|[A-Za-z]{1,4}\d{1,4}")  # plain words and short tags (v2, sha256)
+KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
+
+
+def _entropy(s: str) -> float:
+    return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
+
+
+def _wordy(part: str) -> bool:
+    return bool((len(part) < HEX_KEY_LEN and _HEX.fullmatch(part)) or _CAMEL.fullmatch(part) or _WORDY.fullmatch(part))
+
+
+def _keylike(text: str) -> bool:
+    for hit in _KEY_TOKEN.finditer(text):
+        parts = [p for p in re.split(r"[/_-]", hit.group()) if p]
+        m = "".join(parts)
+        if len(m) < 20 or (len(parts) > 1 and all(_wordy(p) for p in parts)):
+            continue
+        if len(m) >= HEX_KEY_LEN and _HEX.fullmatch(m):
+            if not (len(m) == 40 and _COMMIT_CTX.search(text[:hit.start()])):
+                return True
+            continue
+        if (re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
+                and _entropy(m) >= KEY_ENTROPY_BITS):
+            return True
+    return False
+
+
+def looks_sensitive(text: object) -> bool:
+    """Credentials, card/ID numbers, key/token-shaped strings, base32 seeds, health or money details: never learned."""
+    s = "" if text is None else str(text)
+    return bool(_SENSITIVE.search(s) or _KEY_VALUE.search(s) or logs.has_secret(s) or _keylike(s) or _base32(s))
 
 
 def normalize(text: str) -> str:
