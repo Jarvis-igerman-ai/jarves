@@ -77,6 +77,8 @@ _KEY_WORD = (r"(?<![A-Za-z])(?:(?:api|access|secret|private)[\s_-]*keys?|secrets
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
     rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
+    # #1711 review R1: a bare "key: X" / "wifi key = X" needs a credential-like value ("key: C minor" stays allowed)
+    r"\bkeys?\b(?:\s+[^\s:=]+){0,2}?\s*[:=]\s*(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}|"
     # after a spoken "is/was/הוא/היא/זה" (up to five words after the keyword, a bare "key" included) the value must
     # look like a credential: 6+ characters with a digit or a non-hyphen symbol ("expired", "well-known" stay allowed)
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
@@ -93,6 +95,8 @@ HEX_KEY_LEN = 32
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # only git words that name a commit (#1099 review R1: fix/rev/reset/checkout also precede keys in plain speech)
 _COMMIT_CTX = re.compile(r"\b(?:commit|sha1?|revert|cherry-pick|bisect)\W*$", re.I)
+# #1711 review R2: a 64-char SHA-256 digest right after a checksum word is a download checksum, not a key
+_DIGEST_CTX = re.compile(r"\b(?:sha-?256|checksum|digest)\W*$", re.I)
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
 _WORDY = re.compile(r"[A-Z]?[a-z]+|[A-Z]+|[A-Za-z]{1,4}\d{1,4}")  # plain words and short tags (v2, sha256)
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
@@ -115,7 +119,9 @@ def _keylike(text: str) -> bool:
         m = "".join(parts)
         # #1099 review R1: joined hex is judged before the word-like skip, so dash-grouped hex keys count (UUIDs do not)
         if len(m) >= HEX_KEY_LEN and _HEX.fullmatch(m):
-            if not (_UUID.fullmatch(hit.group()) or (len(m) == 40 and _COMMIT_CTX.search(text[:hit.start()]))):
+            before = text[:hit.start()]
+            if not (_UUID.fullmatch(hit.group()) or (len(m) == 40 and _COMMIT_CTX.search(before))
+                    or (len(m) == 64 and _DIGEST_CTX.search(before))):
                 return True
             continue
         if len(m) < 20 or (len(parts) > 1 and all(_wordy(p) for p in parts)):

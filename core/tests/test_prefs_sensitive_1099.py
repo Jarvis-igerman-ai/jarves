@@ -35,6 +35,7 @@ KEYS = [
     "remember " + "ab12cd34" * 8,
     # review of #1690 R1: a broad word such as fix/rev/reset/checkout before 40 hex chars is no commit context
     "fix 9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "remember e3b0c44298fc1c14af9bf4c8996fb92427ae41e46a9b934ca4959f1b7852b855",  # 64 hex, no digest word
     "reset 9fceb02d0ae598e95dc970b74767f19372d61af8",
     "checkout 9fceb02d0ae598e95dc970b74767f19372d61af8",
     # review of #1690 R2: a bare "secret" with a value
@@ -52,6 +53,9 @@ KEYS = [
     "remember QxWvTzKpLmNbRgHsYfDjCuEa",
     "paste kWqZrTxVbNmLpHgFdSaJyUeI/oPc",
     "הטוקן שלי הוא abcdefgh",
+    # review of #1711 (74fd51e2) R1: a bare "key" with ":" or "=" and a credential-like value
+    "key: hunter2-x",
+    "wifi key = abc123!",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -85,6 +89,12 @@ PLAIN = [
     "the api key is hunterfoobar",                                       # not possessive: digit rule still applies
     "ThisIsMyFavouriteSongEverWritten on repeat",                        # 24+ mixed case, but camelCase words
     "the McDonaldsHappyMealToysCollection",
+    "key: C minor",                                                      # bare key, value not credential-like
+    "the key = loyalty",
+    # review of #1711 (74fd51e2) R2: a 64-hex digest after sha256/checksum/digest is a download checksum
+    # (a digest with 6+ consecutive digits is still refused by the older long-number rule, as on main)
+    "verify sha256 " + "e3b0c44298fc1c14af9bf4c8996fb92427ae41e46a9b934ca4959f1b7852b855",
+    "checksum: " + "e3b0c44298fc1c14af9bf4c8996fb92427ae41e46a9b934ca4959f1b7852b855",
 ]
 
 
@@ -123,3 +133,26 @@ def test_goal_carrying_a_token_is_refused_and_stores_nothing(home):
         g.add("set up github", "my github_token=abc")
     assert g.add("fix token refresh expiry")["title"] == "fix token refresh expiry"
     assert len(g.list()) == 1
+
+
+def test_goal_plan_carrying_a_token_is_refused_and_stores_nothing(home):
+    """Review of #1711 (74fd51e2) R3: goal plans refuse a key in the title or a step reason."""
+    from jarves.goal_plans import PlanStore
+    st = PlanStore(open_db(home))
+    with pytest.raises(ValueError):
+        st.propose("my api key is hunter2-x", [{"tool": "noop", "args": {}, "why": "x"}])
+    with pytest.raises(ValueError):
+        st.propose("set up github", [{"tool": "noop", "args": {}, "why": "github_token=abc"}])
+    assert st.list() == []
+
+
+def test_dev_draft_carrying_a_token_is_refused_and_stores_nothing(home):
+    """Review of #1711 (74fd51e2) R3: development drafts refuse a key in the title or body."""
+    from jarves import devmanager
+    from jarves.store import Store
+    st = Store(home / "store.db")
+    with pytest.raises(ValueError):
+        devmanager.suggest(st, "rotate key", "key: hunter2-x")
+    with pytest.raises(ValueError):
+        devmanager.suggest(st, "remember Zx9fQ2LmB7vT4kRw8YpN3sHd")
+    assert devmanager.listing(st) == []
