@@ -278,10 +278,27 @@ def _driver_repo(tmp_path: Path, marker: Path) -> Path:
     return repo
 
 
-def test_drivers_and_programs_named_by_the_shared_config_never_run(tmp_path):
+def _owner_signer(tmp_path: Path, monkeypatch, signed: Path) -> None:
+    """The owner's own global config: a fake gpg that writes `signed` and returns a signature git accepts."""
+    gpg, gh = tmp_path / "owner-gpg", tmp_path / "owner-home"
+    gpg.write_text(f"#!/bin/sh\necho signed >> '{signed.as_posix()}'\nprintf '[GNUPG:] NEWSIG\\n[GNUPG:] SIG_CREATED "
+                   "D 1 8 00 0 X\\n' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nx\\n-----END PGP SIGNATURE-----\\n'\n",
+                   encoding="utf-8")
+    gpg.chmod(0o755)
+    gh.mkdir()
+    (gh / ".gitconfig").write_text(f"[gpg]\n\tprogram = {gpg.as_posix()}\n[user]\n\tsigningkey = OWNERKEY\n",
+                                   encoding="utf-8")
+    for var in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(var, str(gh))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(gh / "xdg"))
+
+
+def test_drivers_and_programs_named_by_the_shared_config_never_run(tmp_path, monkeypatch):
     """#1407 item 3: worktree add (smudge), add/commit (clean), diff for the reviewer (textconv, external diff), a
-    conflicting merge (merge driver) and the signed ship merge (gpg.program) run none of the repository's commands."""
-    marker, home = tmp_path / "ran.txt", tmp_path / "home"
+    conflicting merge (merge driver) and a real signed ship merge (gpg.program) run none of the repository's commands;
+    the ship merge signs with the owner's global gpg.program instead (review R1 on #1720)."""
+    marker, home, signed = tmp_path / "ran.txt", tmp_path / "home", tmp_path / "signed.txt"
+    _owner_signer(tmp_path, monkeypatch, signed)
     repo = _driver_repo(tmp_path, marker)
     (repo / "f.txt").write_text("changed\n", encoding="utf-8")       # plain git runs the filter on a changed file
     subprocess.run(["git", "add", "f.txt"], cwd=repo, capture_output=True)         # the setup itself works
@@ -295,8 +312,15 @@ def test_drivers_and_programs_named_by_the_shared_config_never_run(tmp_path):
     (repo / "f.txt").write_text("owner\n", encoding="utf-8")
     gitops.git(repo, "commit", "-qam", "owner", "--no-verify")
     assert gitops.merge_in(repo, "jarves/p1/t1-a1") == ["f.txt"]                   # a plain conflict, aborted
+    integ = home / "projects" / "1" / "integration"                               # a commit main does not have
+    (integ / "ship.txt").write_text("ship\n", encoding="utf-8")
+    assert gitops.commit_all(integ, "ship")
     subprocess.run(["git", "config", "commit.gpgsign", "true"], cwd=repo, check=True)
-    gitops.merge_in(repo, "jarves/p1/integration", ident=False)                   # signing may fail; never runs
+    before = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert gitops.merge_in(repo, "jarves/p1/integration", ident=False) == []      # the ship path: a merge commit
+    head = gitops.git(repo, "rev-list", "--parents", "-n1", "HEAD").stdout.split()
+    assert head[0] != before and len(head) == 3 and (repo / "ship.txt").read_text(encoding="utf-8") == "ship\n"
+    assert "gpgsig" in gitops.git(repo, "cat-file", "commit", "HEAD").stdout and signed.exists()
     assert not marker.exists()
 
 
@@ -304,6 +328,8 @@ def test_owner_global_filters_are_kept_and_repo_scope_commands_are_overridden(tm
     """#1407: only repository-scope keys are switched off; the owner's global settings (git-lfs filters) stay. A
     config-defined hook (`hook.<name>.command`, newer git than CI's) is replaced by `true`."""
     listing = "\0".join(["global", "filter.lfs.clean\ngit-lfs clean -- %f", "global", "gpg.program\n/usr/bin/gpg2",
+                         "system", "filter.lfs.required\ntrue", "local", "filter.lfs.process\nevil",
+                         "global", "merge.ours.driver\ntrue", "local", "merge.ours.driver\nevil",
                          "local", "filter.ev.il.clean\nx", "local", "merge.evil.driver\nx", "local", "merge.ff\nfalse",
                          "worktree", "hook.pwn.command\nx", "local", "gpg.program\nx", "local",
                          "gpg.ssh.defaultkeycommand\nx", "local", "user.name\nA", ""])
@@ -311,4 +337,6 @@ def test_owner_global_filters_are_kept_and_repo_scope_commands_are_overridden(tm
     assert "filter.ev.il.clean=" in out and "filter.ev.il.process=" in out and "filter.ev.il.required=false" in out
     assert "merge.evil.driver=" in out and "hook.pwn.command=true" in out
     assert "gpg.program=/usr/bin/gpg2" in out and "gpg.ssh.defaultkeycommand=" in out
-    assert not [o for o in out if "lfs" in o or o.startswith(("merge.ff", "user."))]
+    assert {"filter.lfs.clean=git-lfs clean -- %f", "filter.lfs.process=", "filter.lfs.smudge=",
+            "filter.lfs.required=true", "merge.ours.driver=true"} <= set(out)          # review R2: owner's kept
+    assert not [o for o in out if o.startswith(("merge.ff", "user."))]

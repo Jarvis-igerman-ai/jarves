@@ -83,8 +83,9 @@ _PROGRAMS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.progr
 def config_overrides(listing: str) -> list[str]:
     """`-c` values that switch off every command a repository-scope config names (#1407). `listing` is
     `git config --show-scope --null --list`. Repository scope (`.git/config`, `config.worktree` and files they
-    include) is writable by agents; the owner's global and system settings (git-lfs filters, their gpg) are kept.
-    A filter loses its commands (content is stored as is), a merge driver becomes a plain conflict, a config hook
+    include) is writable by agents; the owner's global and system settings (git-lfs filters, their gpg) are kept,
+    also where the repository config names the same filter or program (#1720 review R2). Otherwise a filter loses
+    its commands (content is stored as is), a merge driver becomes a plain conflict, a config hook
     (`hook.<name>.command`, newer git than CI's 2.43: UNVERIFIED there) runs `true`."""
     items, trusted, local = listing.split("\0"), {}, []
     for scope, entry in zip(items[0::2], items[1::2]):
@@ -97,13 +98,13 @@ def config_overrides(listing: str) -> list[str]:
     for key in local:
         sec, _, rest = key.partition(".")
         name = rest.rpartition(".")[0]
-        if sec == "filter" and name:
-            out += [f"filter.{name}.clean=", f"filter.{name}.smudge=", f"filter.{name}.process=",
-                    f"filter.{name}.required=false"]
+        if sec == "filter" and name:            # each value: the owner's global/system one, else switched off
+            out += [f"filter.{name}.{v}={trusted.get(f'filter.{name}.{v}', '')}" for v in ("clean", "smudge", "process")]
+            out.append(f"filter.{name}.required={trusted.get(f'filter.{name}.required', 'false')}")
         elif sec == "merge" and name:
-            out.append(f"merge.{name}.driver=")
+            out.append(f"merge.{name}.driver={trusted.get(f'merge.{name}.driver', '')}")
         elif sec == "hook" and name:
-            out.append(f"hook.{name}.command=true")
+            out.append(f"hook.{name}.command={trusted.get(f'hook.{name}.command', 'true')}")
         elif key in _PROGRAMS:
             out.append(f"{key}={trusted.get(key, _PROGRAMS[key])}")
     return list(dict.fromkeys(out))
