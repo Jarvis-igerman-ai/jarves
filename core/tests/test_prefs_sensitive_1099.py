@@ -31,6 +31,11 @@ KEYS = [
     "remember Zx9f/Q2LmB7v/T4kRw8YpN3sHd+",
     # #1099 review 5 R1: a lowercase alphanumeric token with "/" is not a path
     "remember k3j9x2m8q7/p4z1w6v5b0n2",
+    # #1099 review 6: R2 a strong word right before ":" still refuses any value; R3 hex or grouped key by a key word
+    "my api key: hunter",
+    "openai key 5f4dcc3b5aa765d61d8327deb882cf99",
+    "wifi key AbC1-xYz9-Qr7T-mN3p-Kd8W",
+    "the token for work 5f4dcc3b5aa765d61d8327deb882cf99",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -68,6 +73,14 @@ PLAIN = [
     # #1099 review 5 R3: OKR-style goal text is not a key
     "key result: Q4-2026 revenue",
     "key points: Q4-2026 plan",
+    # #1099 review 6: R1 planning wording with a date, time or quarter; R2 dev tasks naming a strong word
+    "key dates: 2026-12-01",
+    "key milestone: Q4-2026",
+    "the key meeting is 10:30am",
+    "fix api key loader: done",
+    "client secret rotation: done",
+    "fix key loader in commit 9fceb02d0ae598e95dc970b74767f19372d61af8",   # SHA more than two words after "key"
+    "remember 5f4dcc3b5aa765d61d8327deb882cf99",                    # bare hex, no key word: allowed (git SHA)
 ]
 
 

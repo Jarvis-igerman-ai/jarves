@@ -59,21 +59,27 @@ _SEED_NEAR = 20
 
 # #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
 # "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
-# A strong word (api key, client secret, ...) refuses any value after ":"/"="; a weak word (a bare token or key) only
-# a credential-shaped one, so "tokens: 5 left" or "fix token refresh: done" stay allowed (review 4, R1/R4).
+# A strong word (api key, client secret, ...) directly before ":"/"=" refuses any value; with other words between
+# ("fix api key loader: done") or with a weak word (a bare token or key) only a credential-shaped value counts.
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*(?:key|token)|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
              r"מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
-# "key result(s)/point(s)" is OKR goal wording, not a credential (review 5 R3)
-_WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b(?!\s+(?:results?|points?)\b)"
+_WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b"
+# A date, time or quarter ("2026-12-01", "10:30am", "Q4-2026") is planning text, not a value (review 6 R1).
+_DATE = r"(?:q[1-4][-/]?\d{2,4}|\d{1,4}(?:[-/.:]\d{1,4}){1,2}(?:am|pm)?)(?![^\s.,;!?])"
 # a credential-shaped value: 6+ characters with a digit or a non-hyphen symbol, so state words such as "expired",
 # "rotated" or "well-known" are not values
-_CRED = r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}"
+_CRED = rf"(?!{_DATE})(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{{6,}}"
+# a 32+ hex key or a hyphen-grouped key (AbC1-xYz9-Qr7T-mN3p) at most two words after a key word (review 6 R3);
+# without a key word nearby such strings stay allowed (git SHAs, UUIDs)
+_NEAR_KEY = (r"(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{32,}|"
+             r"(?=\S*\d)(?=\S*[a-z])(?:[a-z0-9]{4,}-){3,}[a-z0-9]{4,}")
 _KEY_VALUE = re.compile(
-    # "keyword: value" / "keyword = value" with at most two words between
-    rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
+    # "keyword: value" / "keyword = value"; "my"/"שלי" may stand between a strong word and ":"
+    rf"(?:{_KEY_WORD})(?:\s+(?:שלי|שלנו))?\s*[:=]\s*\S|"
     rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*{_CRED}|"
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword)
-    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+{_CRED}", re.I)
+    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+{_CRED}|"
+    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s+(?:{_NEAR_KEY})(?![^\s.,;!?])", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
 # and neither is a camelCase name built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback).
