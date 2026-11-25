@@ -16,7 +16,7 @@ from . import gitops
 _log = logging.getLogger(__name__)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
-_SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+_SLUG = re.compile(r"github\.com(?::22(?=/))?[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")   # #1790: :22
 
 
 class ForgeError(RuntimeError):
@@ -101,12 +101,33 @@ _PUSH_URL = re.compile(r"^(?:https://(?i:github\.com)/|ssh://git@(?i:github\.com
                        r"|git@(?i:github\.com):)[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*?(?:\.git)?/?\Z")
 
 
+def _push_env(box: str, url: str) -> dict[str, str]:
+    """#1790: agents run as the owner and share HOME, so ~/.gitconfig and the XDG git config are agent-writable
+    (core.sshCommand, credential helpers, http.proxy/sslVerify, url rewrites, written even after a check). The push
+    reads instead a JARVES-written global file in its own temp folder: its only credential helper is the owner's gh
+    login (`gh auth git-credential`; the empty entry resets earlier helpers) and http.sslVerify is on. The system
+    config (admin-owned) still applies: its sshCommand/helper/proxy, else plain `ssh` and ~/.ssh/config."""
+    gh = gh_cmd()
+    helper = ""
+    if gh and url.startswith("https://"):
+        exe = Path(gh[0]).as_posix()
+        if any(c in exe for c in "\n\r\0"):
+            raise ForgeError("the path of the GitHub CLI (gh) has a control character")
+        v = "!'" + exe.replace("'", "'\\''") + "' auth git-credential"            # sh quoting, then git config's
+        helper = '\thelper = "' + v.replace("\\", "\\\\").replace('"', '\\"') + '"\n'
+    cfg = Path(box) / "global.gitconfig"
+    text = (f"[credential]\n\thelper =\n{helper}[http]\n\tsslVerify = true\n"
+            f"[http \"https://github.com\"]\n\tsslVerify = true\n")
+    cfg.write_text(text, encoding="utf-8")
+    return {"GIT_CONFIG_GLOBAL": str(cfg)}
+
+
 def push_branch(path: str, branch: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch).
     #1722: the project's own config is agent-writable (remote.<x>.receivepack/pushurl, url.*.insteadOf, ext::,
     core.sshCommand, credential helpers, gpg...). So git push runs in a fresh JARVES-made bare repository that borrows
-    the project's objects (alternates): only the owner's system/global config applies, and nothing the project config
-    adds later reaches the push. The one value read from it, origin's URL, must be a github.com https/ssh URL.
+    the project's objects (alternates): only the system config and JARVES's own global file apply (#1790, _push_env), and
+    nothing the project config or ~/.gitconfig adds later reaches the push. The one value read from it, origin's URL, must be a github.com https/ssh URL.
     Afterwards refs/remotes/origin/<branch> is set locally, best effort (the branch is already pushed); no
     `reference-transaction` hook runs there, as gitops.git pins core.hooksPath to NO_HOOKS on the command line."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
@@ -118,18 +139,21 @@ def push_branch(path: str, branch: str) -> None:
         raise ForgeError("JARVES cannot push from a shallow clone: run git fetch --unshallow in the project first")
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
     objects = gitops.git(path, "rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.strip()
-    tmp = tempfile.mkdtemp(prefix="jarves-push-")
+    box = tempfile.mkdtemp(prefix="jarves-push-")
     try:
-        gitops.git(tmp, "init", "-q", "--bare")
+        env, tmp = _push_env(box, url), os.path.join(box, "push.git")
+        # --template=: no init.templateDir hooks or config; the global file is JARVES's own (#1790)
+        gitops.git(box, "init", "-q", "--bare", "--template=", tmp, env_extra=env)
+        (Path(tmp) / "objects" / "info").mkdir(parents=True, exist_ok=True)
         # bytes: a text-mode "\r\n" on Windows would make git read the path as "objects\r" (CI, round 1)
         (Path(tmp) / "objects" / "info" / "alternates").write_bytes((objects + "\n").encode("utf-8"))
         gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", url, f"{sha}:refs/heads/{branch}",
-                   timeout=300, ident=False)
+                   timeout=300, ident=False, env_extra=env)
     finally:
         try:   # a file git still holds open on Windows must not turn a finished push into a failure (round 3 R2)
-            shutil.rmtree(tmp)
+            shutil.rmtree(box)
         except OSError as e:
-            _log.warning("could not remove the temporary push repository %s: %s", tmp, e)
+            _log.warning("could not remove the temporary push repository %s: %s", box, e)
     try:
         gitops.git(path, "update-ref", f"refs/remotes/origin/{branch}", sha)
     except (gitops.GitError, OSError, subprocess.SubprocessError) as e:
