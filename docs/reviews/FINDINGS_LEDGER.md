@@ -25,6 +25,7 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 425 | Windows toast fallback test when tray/popup cannot show | testing | Fallback path is untested | test |
 | 426 | Installer restart smoke: silent install restores pre-install state (#383) | testing / installer | Restart behaviour not covered by a smoke test | test |
 | 427 | Hotfix apply test on a real source tree (copy, apply, verify, rollback) | testing / hotfix | Only mocked trees are tested | test |
+| 1099-a | preferences.looks_sensitive allows a bare 32+ hex string with no key word within two words (documented tradeoff so git SHAs pass) | prefs / security | A pasted hex key without a key word nearby can still be learned | review #1753 R5 |
 | 497 | GitHub write: reset-audit / deleting audit files reset the rate limit without popup | github write | Rate limit can be reset by local file edits (owner-local only) | review |
 | 508 | Release gate: signed sheet has no owner identity or content hash | release gate | Sheet signature is not bound to the owner or content | review |
 | 518 | release_flow: review findings from PR 514 | release | Minor review nits | review |

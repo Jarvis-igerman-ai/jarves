@@ -36,6 +36,11 @@ KEYS = [
     "openai key 5f4dcc3b5aa765d61d8327deb882cf99",
     "wifi key AbC1-xYz9-Qr7T-mN3p-Kd8W",
     "the token for work 5f4dcc3b5aa765d61d8327deb882cf99",
+    # #1099 review 7 R1: digit groups that are not a real date or time are a value, not planning text
+    "wifi key = 1234-5678-9012",
+    "door key: 4821-9933",
+    "the key is 13/45/9999",
+    "token: 99:99:99",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -77,6 +82,8 @@ PLAIN = [
     "key dates: 2026-12-01",
     "key milestone: Q4-2026",
     "the key meeting is 10:30am",
+    "key dates: 31/12/2026",
+    "key call: 9:15pm",
     "fix api key loader: done",
     "client secret rotation: done",
     "fix key loader in commit 9fceb02d0ae598e95dc970b74767f19372d61af8",   # SHA more than two words after "key"

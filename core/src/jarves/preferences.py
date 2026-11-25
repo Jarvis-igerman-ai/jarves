@@ -64,8 +64,11 @@ _SEED_NEAR = 20
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*(?:key|token)|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
              r"מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
 _WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b"
-# A date, time or quarter ("2026-12-01", "10:30am", "Q4-2026") is planning text, not a value (review 6 R1).
-_DATE = r"(?:q[1-4][-/]?\d{2,4}|\d{1,4}(?:[-/.:]\d{1,4}){1,2}(?:am|pm)?)(?![^\s.,;!?])"
+# A date, time or quarter ("2026-12-01", "31/12/2026", "10:30am", "Q4-2026") is planning text, not a value (review 6
+# R1). Only real month/day/hour/minute ranges count, so digit groups such as "4821-9933" stay a value (review 7 R1).
+_MD = r"(?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])"
+_DATE = (rf"(?:q[1-4][-/]?\d{{2,4}}|\d{{4}}[-/.](?:{_MD})|(?:{_MD})(?:[-/.](?:\d{{4}}|\d{{2}}))?"
+         r"|(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:am|pm)?)(?![^\s.,;!?])")
 # a credential-shaped value: 6+ characters with a digit or a non-hyphen symbol, so state words such as "expired",
 # "rotated" or "well-known" are not values
 _CRED = rf"(?!{_DATE})(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{{6,}}"
