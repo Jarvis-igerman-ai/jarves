@@ -283,6 +283,29 @@ class UnlockTests(unittest.TestCase):
             open_dashboard(self.home, 1, show_link=True, token=lambda h: "t", probe=lambda p: True, owner="secret-v")
         self.assertNotIn("secret-v", out.getvalue())
 
+    def test_browser_failure_message_never_carries_the_owner_value_1416(self):
+        from jarves.workflow.opener import open_dashboard
+        def boom(url):
+            raise OSError("no browser")
+        for browser in (lambda url: False, boom):                      # not started, and launcher error
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = open_dashboard(self.home, 1, show_link=False, token=lambda h: "t", probe=lambda p: True,
+                                    browser=browser, owner="secret-v")
+            self.assertEqual(rc, 1)
+            self.assertNotIn("secret-v", out.getvalue() + err.getvalue())
+            self.assertNotIn("#token=", out.getvalue() + err.getvalue())  # no link at all, it points to --no-open
+
+    def test_open_with_the_server_down_issues_no_code_1416(self):
+        out, err = io.StringIO(), io.StringIO()
+        with (patch.object(cli, "owner_only_guard", return_value="terminal"),
+              patch("jarves.workflow.opener.listening", return_value=False),
+              patch("webbrowser.open", side_effect=AssertionError("no browser for a down server")),
+              redirect_stdout(out), redirect_stderr(err)):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open"]), 2)
+        self.assertFalse((self.home / unlock.FILE).exists())          # no code replaced for nothing
+        self.assertNotIn("Unlock code", err.getvalue())
+
     def test_a_login_flood_cannot_push_out_the_bound_owner_window_1416(self):
         import time
         from jarves.workflow.server import MAX_SESSIONS

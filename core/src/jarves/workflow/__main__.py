@@ -249,19 +249,22 @@ def main(argv=None) -> int:
     if a.action == "open":
         # One step (#789): open the login in the default browser and print nothing secret.
         # The token link is printed only with --no-open; it stays out of event logs and process arguments.
+        from . import opener
         from .opener import open_dashboard
         code, owner = "", ""
-        try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
-            owner_only_guard("open")
-            import secrets
-            from . import unlock
-            # #1416: issue first, bound to the window opened below, so other windows cannot cancel this code.
-            # --no-open prints the link for scripts or another device: no owner value then (#1265 rules apply),
-            # so whoever receives that printed link cannot take the owner's reserved tries.
-            owner = "" if a.no_open else secrets.token_urlsafe(32)
-            code = unlock.issue(home, owner=owner)
-        except PermissionError:
-            pass
+        # #1416: with the server down, open stops with rc 2 and no window can use a code, so none replaces a live one.
+        if a.no_open or opener.listening(a.port):
+            try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
+                owner_only_guard("open")
+                import secrets
+                from . import unlock
+                # #1416: issue first, bound to the window opened below, so other windows cannot cancel this code.
+                # --no-open prints the link for scripts or another device: no owner value then (#1265 rules apply),
+                # so whoever receives that printed link cannot take the owner's reserved tries.
+                owner = "" if a.no_open else secrets.token_urlsafe(32)
+                code = unlock.issue(home, owner=owner)
+            except PermissionError:
+                pass
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token, owner=owner)
         if code:
             from . import unlock
