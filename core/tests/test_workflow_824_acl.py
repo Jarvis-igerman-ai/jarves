@@ -84,3 +84,15 @@ def test_failed_tighten_is_retried_next_time(monkeypatch, tmp_path):
     for _ in range(3):
         server.load_sessions(tmp_path)
     assert seen == ["sessions.json", "sessions.json"]  # failed, retried and succeeded, then done
+
+
+def test_permanent_tighten_failure_is_bounded(monkeypatch, tmp_path):
+    """JAR-824 review R1: a permanently failing icacls runs (and warns) at most _TIGHTEN_TRIES times per file."""
+    seen: list[str] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p).name) and False)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    for _ in range(10):
+        server.load_sessions(tmp_path)
+    assert seen == ["sessions.json"] * server._TIGHTEN_TRIES
