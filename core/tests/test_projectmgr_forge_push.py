@@ -23,13 +23,19 @@ def home(tmp_path, monkeypatch):
     h.mkdir()
     bare = tmp_path / "remote" / "r.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
-    (h / ".gitconfig").write_text(f"[user]\n\tname = O\n\temail = o@example.invalid\n[protocol \"ext\"]\n\tallow = "
-                                  f"always\n[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
+    (h / ".gitconfig").write_text(f"[user]\n\tname = O\n\temail = o@example.invalid\n[protocol \"ext\"]\n"
+                                  f"\tallow = always\n[protocol \"https\"]\n\tallow = never\n"
+                                  f"[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
     for k in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(k, str(h))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
+    # #1748: only this harness rewrite to the local bare repository passes; the unwrapped check refuses the bare
+    # path (test_the_unwrapped_check_refuses_the_harness_bare_repository). R1: https is blocked (no network).
+    real = forge._check_push_target
+    monkeypatch.setattr(forge, "_check_push_target",
+                        lambda url, got: real(url, [URL if g == bare.as_posix() else g for g in got]))
     return bare
 
 
@@ -174,3 +180,82 @@ def test_a_failed_temp_cleanup_does_not_fail_the_push(tmp_path, home, monkeypatc
     assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
     for p in seen:
         real(p, ignore_errors=True)
+
+
+def _global(text: str) -> None:
+    with open(Path.home() / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write(text)
+
+
+@pytest.mark.parametrize("rule", ["insteadOf", "pushInsteadOf"])
+def test_a_global_url_rewrite_to_another_target_is_refused(tmp_path, home, rule):
+    """#1748: an agent-writable ~/.gitconfig rewrite of the checked origin URL is refused before anything is pushed."""
+    origin = "https://github.com/o/x.git"
+    repo, _, _ = _setup(tmp_path, origin)
+    evil = tmp_path / "evil.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
+    _global(f"[url \"{evil.as_posix()}\"]\n\t{rule} = {origin}\n")
+    neg = _plain(repo, "push", "origin", BRANCH)
+    assert neg.returncode == 0 and _on(evil), neg.stderr                     # negative control: plain git obeys it
+    subprocess.run(["git", "--git-dir", str(evil), "branch", "-D", BRANCH], check=True, capture_output=True)
+    with pytest.raises(forge.ForgeError, match="rewrites"):
+        forge.push_branch(str(repo), BRANCH)
+    assert not _on(evil)
+
+
+def test_a_global_rewrite_to_another_github_repository_is_refused(tmp_path, home):
+    """#1748: the resolved URL keeps a github.com form but names another repository (refused before any network)."""
+    repo, _, _ = _setup(tmp_path, "https://github.com/o/x.git")
+    _global("[url \"https://github.com/evil/\"]\n\tpushInsteadOf = https://github.com/o/\n")
+    with pytest.raises(forge.ForgeError, match="rewrites"):
+        forge.push_branch(str(repo), BRANCH)
+
+
+def test_a_global_pushurl_for_the_origin_url_is_not_used(tmp_path, home):
+    """#1748: plain `git push <url>` honours a global remote."<url>".pushurl; JARVES pushes through its own remote."""
+    repo, _, _ = _setup(tmp_path)
+    evil = tmp_path / "evil.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
+    _global(f"[remote \"{URL}\"]\n\tpushurl = {evil.as_posix()}\n")
+    neg = _plain(repo, "push", URL, BRANCH)
+    assert neg.returncode == 0 and _on(evil), neg.stderr   # negative control: plain git obeys it
+    subprocess.run(["git", "--git-dir", str(evil), "branch", "-D", BRANCH], check=True, capture_output=True)
+    forge.push_branch(str(repo), BRANCH)
+    assert _on(home) and not _on(evil)
+
+
+@pytest.mark.parametrize("got,ok", [(["git@github.com:o/r.git"], True), (["https://github.com/O/R"], True),
+                                    (["ssh://git@github.com/o/r.git"], True), (["ssh://git@github.com:22/o/r"], True),
+                                    (["ssh://git@github.com:22/22/o"], False),
+                                    (["https://github.com/o/other.git"], False), ([], False),
+                                    ([URL, "git@github.com:o/r.git"], False), (["file:///tmp/r.git"], False)])
+def test_check_push_target(got, ok):
+    """#1748: the owner's own same-repository rewrite (https to ssh) still passes; anything else is refused."""
+    if ok:
+        forge._check_push_target(URL, got)
+    else:
+        with pytest.raises(forge.ForgeError, match="another target or an unsupported URL form"):
+            forge._check_push_target(URL, got)
+
+
+@pytest.mark.parametrize("got", ["https://u:ghp_secret@github.com/o/r.git", "https://ghp_secret@evil.invalid/o/r",
+                                 "ssh://ghp_secret@github.com/o/r", "ghp_secret@github.com:o/r.git",
+                                 "u:ghp_secret@github.com:o/r.git"])
+def test_a_token_in_a_rewritten_url_is_refused_and_not_shown(got):
+    """Review R1/R2 (round 2): a token-bearing global insteadOf is refused, and the token is not in the message."""
+    with pytest.raises(forge.ForgeError, match="credential helper") as e:
+        forge._check_push_target(URL, [got])
+    assert "ghp_secret" not in str(e.value) and "***@" in str(e.value)
+
+
+def test_the_unwrapped_check_refuses_the_harness_bare_repository(tmp_path):
+    """Review R4: the `home` fixture's wrapper is the only reason the local bare repository passes."""
+    with pytest.raises(forge.ForgeError, match="rewrites"):
+        forge._check_push_target(URL, [(tmp_path / "remote" / "r.git").as_posix()])
+
+
+def test_the_harness_blocks_https(tmp_path, home):
+    """Review R1: a regression of the #1748 check fails locally instead of pushing to github.com from CI."""
+    repo, _, _ = _setup(tmp_path, "https://github.com/o/x.git")
+    neg = _plain(repo, "push", "origin", BRANCH)
+    assert neg.returncode != 0 and "not allowed" in neg.stderr, neg.stderr
