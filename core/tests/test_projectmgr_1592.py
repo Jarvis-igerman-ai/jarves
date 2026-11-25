@@ -81,3 +81,11 @@ def test_overlapping_guards_keep_the_first_baseline(wt):
     ga.__exit__(None, None, None)                      # restores and reports to the first run
     gb.__exit__(None, None, None)                      # must not put the planted files back
     assert a and _shared(wt) == before
+
+
+def test_a_file_that_cannot_be_restored_still_fails_the_check(wt, monkeypatch):
+    def deny(path, snap):
+        raise PermissionError("denied")
+    monkeypatch.setattr(gitops, "_restore", deny)
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", PLANT])
+    assert not ok and "config (NOT restored: denied)" in out

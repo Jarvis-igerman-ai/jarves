@@ -396,19 +396,22 @@ def _snap(path: Path) -> tuple | None:
         return ("file", path.read_bytes(), path.stat().st_mode & 0o777)
     except FileNotFoundError:
         return None
+    except OSError as e:                     # e.g. a folder planted in its place: differs, so it is restored or listed
+        return ("unreadable", type(e).__name__)
 
 
-def _restore(path: Path, snap: tuple | None) -> None:
+def _restore(path: Path, snap: tuple | None) -> bool:
     if snap is None or snap[0] == "link":   # a planted file goes; a link is never re-created by JARVES
         if path.is_symlink() or path.exists():
             path.unlink()
-        return
-    if not path.parent.is_dir():             # the worktree was removed meanwhile
-        return
+        return True
+    if not path.parent.is_dir():             # the worktree was removed meanwhile: nothing left to restore
+        return False
     tmp = path.with_name(f".{path.name}.jarves-{os.getpid()}-{threading.get_ident()}.tmp")
     tmp.write_bytes(snap[1])
     os.chmod(tmp, snap[2])
     os.replace(tmp, path)
+    return True
 
 
 @contextmanager
@@ -438,8 +441,8 @@ def shared_git_guard(wt: str | Path, changed: list[str]):
                     for n in sorted(set(g[1]) | set(_guarded(common))):
                         if _snap(common / n) != g[1].get(n):
                             try:
-                                _restore(common / n, g[1].get(n))
-                                changed.append(n)
+                                if _restore(common / n, g[1].get(n)):
+                                    changed.append(n)
                             except OSError as e:   # still fails the run; the owner must look
                                 changed.append(f"{n} (NOT restored: {e})")
                 finally:
