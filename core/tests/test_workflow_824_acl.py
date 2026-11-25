@@ -53,6 +53,7 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     seen: list[Path] = []
     monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
     monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
     tok = server.access_token(tmp_path)
     assert server.access_token(tmp_path) == tok
     server.save_sessions(tmp_path, {})
@@ -67,6 +68,7 @@ def test_existing_sessions_file_is_tightened_at_startup(monkeypatch, tmp_path):
     seen: list[Path] = []
     monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
     monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
     assert server.load_sessions(tmp_path) == {}
     assert seen == []  # no file: nothing to tighten, no icacls warning
     (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
@@ -107,3 +109,54 @@ def test_permanent_tighten_failure_is_bounded(monkeypatch, tmp_path, caplog):
     # JAR-824 review R2: the exhausted state is logged exactly once, not on every later load
     gave_up = [r for r in caplog.records if "gave up" in r.getMessage()]
     assert len(gave_up) == 1 and gave_up[0].levelno == logging.ERROR
+
+
+def test_non_windows_load_marks_done_without_error(monkeypatch, tmp_path, caplog):
+    """JAR-824 review R1 (#1761): off Windows the ACL step is a no-op that counts as done, so repeated loads
+    never run icacls, never consume retries and never log a false "gave up" error."""
+    calls = []
+    monkeypatch.setattr(server.os, "name", "posix")
+    monkeypatch.setattr(server.subprocess, "run", _run_recorder(calls))
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger=server.__name__):
+        for _ in range(5):
+            server.load_sessions(tmp_path)
+    assert calls == []
+    assert str(tmp_path / "sessions.json") in server._TIGHTENED
+    assert caplog.records == []
+
+
+def test_concurrent_loads_never_exceed_the_cap(monkeypatch, tmp_path):
+    """JAR-824 review R2 (#1761): an attempt is reserved before icacls runs, so threads that pass the check
+    together cannot run icacls more than _TIGHTEN_TRIES times."""
+    import threading
+    gate = threading.Barrier(6, timeout=5)
+    inside = threading.Barrier(server._TIGHTEN_TRIES, timeout=5)  # hold the first attempts in icacls together
+    seen: list[str] = []
+
+    def slow_fail(p) -> bool:
+        seen.append(Path(p).name)
+        try:
+            inside.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return False
+
+    monkeypatch.setattr(server, "owner_only_file", slow_fail)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
+    path = tmp_path / "sessions.json"
+    path.write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+
+    def worker() -> None:
+        gate.wait()
+        server._tighten_once(path)
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert len(seen) == server._TIGHTEN_TRIES

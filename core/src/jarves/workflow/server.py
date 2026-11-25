@@ -72,27 +72,30 @@ def owner_only_file(path: Path) -> bool:
 _TIGHTENED: set[str] = set()
 _TIGHTEN_FAILS: dict[str, int] = {}
 _TIGHTEN_TRIES = 3  # a permanently failing icacls runs and warns at most this often per file and process
-_TIGHTEN_LOCK = threading.Lock()  # guards the counters only; icacls runs outside it (idempotent)
+_TIGHTEN_LOCK = threading.Lock()  # guards the counters; icacls runs outside it with its attempt reserved
 
 
 def _tighten_once(path: Path) -> None:
     """Fix an existing file once per process (idempotent); a failed attempt is retried, at most _TIGHTEN_TRIES times.
 
+    Each attempt is reserved under the lock before icacls runs, so concurrent loads cannot exceed the cap.
+    Off Windows owner_only_file is a no-op returning True, so the file is marked done on the first call.
     Reaching the cap logs one error, so a file left with the inherited folder ACL stays visible (JAR-824)."""
     key = str(path)
     with _TIGHTEN_LOCK:
-        if key in _TIGHTENED or _TIGHTEN_FAILS.get(key, 0) >= _TIGHTEN_TRIES:
+        attempt = _TIGHTEN_FAILS.get(key, 0) + 1
+        if key in _TIGHTENED or attempt > _TIGHTEN_TRIES:
             return
+        _TIGHTEN_FAILS[key] = attempt  # reserved; kept as a failure unless this attempt succeeds
     ok = owner_only_file(path)
     with _TIGHTEN_LOCK:
         if ok:
             _TIGHTENED.add(key)
             return
-        _TIGHTEN_FAILS[key] = fails = _TIGHTEN_FAILS.get(key, 0) + 1
-        if fails == _TIGHTEN_TRIES:
-            logging.getLogger(__name__).error(
-                "gave up setting an owner-only ACL on %s after %d attempts; it may keep the folder ACL until restart",
-                path.name, fails)
+    if attempt == _TIGHTEN_TRIES:
+        logging.getLogger(__name__).error(
+            "gave up setting an owner-only ACL on %s after %d attempts; it may keep the folder ACL until restart",
+            path.name, attempt)
 
 
 def access_token(home: Path) -> str:
