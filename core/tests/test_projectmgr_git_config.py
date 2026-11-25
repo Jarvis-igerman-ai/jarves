@@ -448,7 +448,7 @@ def test_a_linked_task_folder_git_is_replaced_never_written_through(tmp_path, mo
     owner = repo / ".git"
     before = {n: (owner / n).read_bytes() for n in ("HEAD", "index")}
     shutil.rmtree(wt / ".git")
-    (wt / ".git").symlink_to(owner, target_is_directory=True)
+    _link_or_skip(wt / ".git", owner)
     monkeypatch.setattr(Path, "is_symlink", lambda self: False if self.name == ".git" else os.path.islink(self))
     monkeypatch.setattr(Path, "is_junction", lambda self: self.name == ".git" and os.path.islink(self), raising=False)
     (wt / "a.py").write_text("1\n", encoding="utf-8")
@@ -474,3 +474,43 @@ def test_removing_an_adopted_task_folder_removes_its_entry_and_branch(tmp_path):
     assert gitops.git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode != 0
     wt2, _ = gitops.new_task_worktree(tmp_path / "home", str(repo), 1, 1, 1)      # a retry onto the same path
     assert wt2 == wt and (wt / ".git").is_dir() and gitops.git(wt, "status", "--porcelain").stdout == ""
+
+
+def _link_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as e:                         # Windows without Developer Mode or the symlink privilege
+        pytest.skip(f"cannot create a symlink here: {e}")
+
+
+def test_a_link_recreated_during_the_rebuild_is_never_written_through(tmp_path, monkeypatch):
+    """#1599 review R1 (cd3d528): an agent process still running may recreate `.git` as a link after any check.
+    The copy is built in a fresh folder JARVES makes and renamed onto `.git` last; a rename never follows a link."""
+    repo, wt = _task(tmp_path)
+    owner, real_git, real_rename = repo / ".git", gitops.git, os.rename
+    before = {n: (owner / n).read_bytes() for n in ("HEAD", "index")}
+
+    def swap():
+        if os.path.islink(wt / ".git"):
+            return
+        if (wt / ".git").is_dir():
+            shutil.rmtree(wt / ".git")
+        _link_or_skip(wt / ".git", owner)
+
+    def git_swapping(cwd, *args, **kw):
+        if args[:1] == ("init",):
+            swap()                                                # after the old check, before the writes
+        return real_git(cwd, *args, **kw)
+
+    def rename_swapping(src, dst):
+        if Path(dst) == wt / ".git":
+            swap()                                                # the last moment before the rename
+        return real_rename(src, dst)
+    monkeypatch.setattr(gitops, "git", git_swapping)
+    monkeypatch.setattr(gitops.os, "rename", rename_swapping)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    with pytest.raises((gitops.GitError, OSError)):
+        gitops.commit_all(wt, "a")
+    assert {n: (owner / n).read_bytes() for n in ("HEAD", "index")} == before
+    assert not (owner / "objects" / "info" / "alternates").exists()
+    assert not list(wt.parent.glob(".jarves-git-*"))              # the build folder is cleaned up

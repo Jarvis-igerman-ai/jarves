@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -162,32 +163,41 @@ def _writable(func, path, exc) -> None:
 
 def _private_git(wt: Path) -> None:
     """(Re)builds the task folder's private `.git` at the task branch's current commit (after adoption and after
-    every JARVES commit): a fresh repository on that branch, the index copied, the owner's objects reached read-only
-    through `objects/info/alternates`. The agent's own commits there are dropped; JARVES commits the folder's files."""
+    every JARVES commit and merge): a fresh repository on that branch, the index copied, the owner's objects reached
+    read-only through `objects/info/alternates`. Everything the agent kept there (commits, stash, reflog, objects)
+    is dropped; JARVES commits the folder's files. Built in a fresh folder JARVES makes next to the task folder and
+    renamed onto `.git` last: a rename replaces or refuses a link or junction, never writes through it."""
     env = _task_env(wt)
     entry = Path(env["GIT_DIR"])
     common = Path(git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
     sha = git(wt, "rev-parse", "HEAD").stdout.strip()
     head = (entry / "HEAD").read_text(encoding="utf-8").strip()
-    dot = Path(wt) / ".git"
-    if _is_link(dot):
-        dot.unlink()                                   # removes the link or junction itself, never its target
-    elif dot.is_dir():
-        shutil.rmtree(dot, onexc=_writable)            # rmtree unlinks a link inside, never follows it
-    else:
-        dot.unlink(missing_ok=True)
-    if dot.exists() or _is_link(dot):
-        raise GitError(f"cannot replace the .git of task folder {Path(wt).name}")
-    git(Path(wt).parent, "init", "-q", "--template=", str(wt))
-    (dot / "objects" / "info").mkdir(parents=True, exist_ok=True)
-    (dot / "objects" / "info" / "alternates").write_text(str(common / "objects") + "\n", encoding="utf-8")
-    ref = head[5:].strip() if head.startswith("ref: ") else ""
-    if ref:
-        (dot / ref).parent.mkdir(parents=True, exist_ok=True)
-        (dot / ref).write_text(sha + "\n", encoding="utf-8")
-    (dot / "HEAD").write_text(f"ref: {ref}\n" if ref else sha + "\n", encoding="utf-8")
-    if (entry / "index").is_file():
-        shutil.copyfile(entry / "index", dot / "index")
+    build = Path(tempfile.mkdtemp(prefix=".jarves-git-", dir=Path(wt).parent))
+    try:
+        git(Path(wt).parent, "init", "-q", "--template=", str(build))
+        new = build / ".git"
+        (new / "objects" / "info").mkdir(parents=True, exist_ok=True)
+        (new / "objects" / "info" / "alternates").write_text(str(common / "objects") + "\n", encoding="utf-8")
+        ref = head[5:].strip() if head.startswith("ref: ") else ""
+        if ref:
+            (new / ref).parent.mkdir(parents=True, exist_ok=True)
+            (new / ref).write_text(sha + "\n", encoding="utf-8")
+        (new / "HEAD").write_text(f"ref: {ref}\n" if ref else sha + "\n", encoding="utf-8")
+        if (entry / "index").is_file():
+            shutil.copyfile(entry / "index", new / "index")
+        dot = Path(wt) / ".git"
+        if _is_link(dot):
+            dot.unlink()                               # removes the link or junction itself, never its target
+        elif dot.is_dir():
+            shutil.rmtree(dot, onexc=_writable)        # rmtree unlinks a link inside, never follows it
+        else:
+            dot.unlink(missing_ok=True)
+        try:
+            os.rename(new, dot)                        # fails on a link or a non-empty folder recreated meanwhile
+        except OSError as e:
+            raise GitError(f"cannot replace the .git of task folder {Path(wt).name}: {e}"[:300]) from e
+    finally:
+        shutil.rmtree(build, onexc=_writable)
 
 
 def require_git(cwd: str | Path) -> None:
