@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -113,6 +114,26 @@ def pin_slug(path: str) -> str:
     return _push_slug(url) if _PUSH_URL.match(url) else ""
 
 
+def _check_push_target(url: str, got: list[str]) -> None:
+    """#1748: the URL(s) git will really push to after the owner's global config (insteadOf, pushInsteadOf, an
+    agent-writable ~/.gitconfig) must be exactly one github.com URL of the same repository as the checked origin."""
+    def slug(u: str) -> re.Match | None:          # review R3: _SLUG would read "ssh://...github.com:22/o/r" as 22/o
+        return _SLUG.search(re.sub(r"(?i)^ssh://git@github\.com:22/", "ssh://git@github.com/", u))
+    want = slug(url)
+    m = slug(got[0]) if len(got) == 1 and _PUSH_URL.match(got[0]) else None
+    if not (m and want and [x.lower() for x in m.group(1, 2)] == [x.lower() for x in want.group(1, 2)]):
+        shown = ", ".join(_no_userinfo(g) for g in got)[:200] or "none"
+        raise ForgeError("JARVES will not push: your global git config rewrites the origin URL to another target or "
+                         f"an unsupported URL form ({shown}; allowed: {PUSH_URL_FORMS} of the same repository). Remove "
+                         "that url.*.insteadOf/pushInsteadOf rule; a user or token in a rewritten URL is refused too: "
+                         "sign in with a credential helper (gh auth setup-git) or use ssh")
+
+
+def _no_userinfo(u: str) -> str:
+    """Review R1: a token in a rewritten URL (https://user:tok@github.com/) never reaches the error text or logs."""
+    return re.sub(r"^[^/]*@", "***@", re.sub(r"(?<=//)[^/]*@", "***@", u))   # round 3 R2: also "u:tok@host:o/r"
+
+
 def push_branch(path: str, branch: str, repo: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch).
     #1595: `repo` is the owner/repo the owner pinned (`jarvis project config --github`, stored as github_repo), never
@@ -140,7 +161,14 @@ def push_branch(path: str, branch: str, repo: str) -> None:
         gitops.git(tmp, "init", "-q", "--bare")
         # bytes: a text-mode "\r\n" on Windows would make git read the path as "objects\r" (CI, round 1)
         (Path(tmp) / "objects" / "info" / "alternates").write_bytes((objects + "\n").encode("utf-8"))
-        gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", url, f"{sha}:refs/heads/{branch}",
+        # #1748: a remote of an unguessable name (a global remote."<url>".pushurl would redirect a push to the bare
+        # URL), resolved as git will push it, then checked again. Not covered (the global config is agent-writable;
+        # a JARVES-owned GIT_CONFIG_GLOBAL is a separate design decision): a global rule added between the two,
+        # core.sshCommand, credential helpers, http.proxy / http.<url>.proxy and http.sslVerify=false (tracked: #1790).
+        name = f"jarves-{secrets.token_hex(8)}"
+        gitops.git(tmp, "config", f"remote.{name}.url", url)
+        _check_push_target(url, gitops.git(tmp, "remote", "get-url", "--push", "--all", name).stdout.splitlines())
+        gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", name, f"{sha}:refs/heads/{branch}",
                    timeout=300, ident=False)
     finally:
         try:   # a file git still holds open on Windows must not turn a finished push into a failure (round 3 R2)
