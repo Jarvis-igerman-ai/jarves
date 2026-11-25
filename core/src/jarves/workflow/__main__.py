@@ -250,13 +250,20 @@ def main(argv=None) -> int:
         # One step (#789): open the login in the default browser and print nothing secret.
         # The token link is printed only with --no-open; it stays out of event logs and process arguments.
         from .opener import open_dashboard
-        rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
+        code, owner = "", ""
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
+            import secrets
             from . import unlock
-            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
+            # #1416: issue first, bound to the window opened below, so other windows cannot cancel this code.
+            owner = secrets.token_urlsafe(32)
+            code = unlock.issue(home, owner=owner)
         except PermissionError:
             pass
+        rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token, owner=owner)
+        if code:
+            from . import unlock
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {code}", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.

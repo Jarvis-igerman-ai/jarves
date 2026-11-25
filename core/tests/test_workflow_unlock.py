@@ -201,6 +201,65 @@ class UnlockTests(unittest.TestCase):
         self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
         self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
 
+    def login_owner(self, owner):
+        status, headers, _ = self.request("/api/session", {"token": self.server.token, "owner": owner})
+        self.assertEqual(status, 200)
+        self.cookie = headers["Set-Cookie"].split(";", 1)[0]
+        return self.cookie
+
+    def test_token_holder_windows_cannot_cancel_the_code_open_bound_to_the_owner_window_1416(self):
+        shown = unlock.issue(self.home, owner="nonce-1416")
+        wrong = "0000" if shown != "0000" else "1111"
+        self.assertNotIn("nonce-1416", (self.home / unlock.FILE).read_text(encoding="ascii"))  # only its digest
+        owner_cookie = self.login_owner("nonce-1416")                  # the window 'jarvis workflow open' launched
+        self.cookie = ""
+        self.login()                                                   # token holder, window A
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 2 + [(403, "owner_window_only")])
+        self.cookie = ""
+        self.login()                                                   # token holder, window B: no fresh tries
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, "owner_window_only")] * 3)
+        self.assertEqual(self.wrong_try(shown), (403, "owner_window_only"))  # not even a right guess
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's code survives the 3 + 2 path
+        self.assertLessEqual(self.server.unlock_wrong.total, 5)
+        self.cookie = owner_cookie
+        self.assertEqual(self.wrong_try(wrong), (403, None))           # the owner keeps typo room
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_owner_value_binds_once_and_only_to_the_live_code_1416(self):
+        shown = unlock.issue(self.home, owner="nonce-a")
+        wrong = "0000" if shown != "0000" else "1111"
+        self.cookie = ""
+        self.login_owner("guess")                                      # a wrong owner value binds nothing
+        self.assertEqual(self.server.unlock_wrong.owner, "")
+        first = self.login_owner("nonce-a")
+        bound = self.server.unlock_wrong.owner
+        self.login_owner("nonce-a")                                    # a second login with it is an ordinary window
+        self.assertEqual(self.server.unlock_wrong.owner, bound)
+        self.assertEqual(first.split("=", 1)[1], bound)
+        # The owner's own typos still count toward the 5-try total, so the guess bound stays 5 of 10,000.
+        self.cookie = first
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
+        self.cookie = ""
+        self.login()
+        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, None)] * 2)
+        self.assertFalse((self.home / unlock.FILE).exists())          # 3 + 2 = 5: cancelled
+        self.assertEqual(unlock.owner_salt(self.home, "nonce-a"), "")
+        # A code issued without an owner value (plain 'jarvis workflow unlock') keeps the #1265 rules.
+        unlock.issue(self.home)
+        self.assertEqual(unlock.owner_salt(self.home, "nonce-a"), "")
+
+    def test_open_issues_the_code_bound_to_the_link_it_launches_1416(self):
+        links = []
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(cli, "owner_only_guard", return_value="terminal"),                 patch("jarves.workflow.opener.listening", return_value=True),                 patch("webbrowser.open", side_effect=lambda url: links.append(url) or True),                 redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open"]), 0)
+        self.assertEqual(len(links), 1)
+        owner = links[0].split("&owner=", 1)[1]
+        self.assertTrue(unlock.owner_salt(self.home, owner))
+        self.assertNotIn(owner, out.getvalue() + err.getvalue())       # the owner value is not printed
+        self.assertIn("Unlock code", err.getvalue())
+
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()
         self.assertFalse((self.home / unlock.FILE).exists())

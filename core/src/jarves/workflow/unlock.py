@@ -29,17 +29,40 @@ def _digest(code: str, salt: bytes) -> bytes:
     return hashlib.scrypt(normalize(code).encode("ascii"), salt=salt, **_SCRYPT)
 
 
-def issue(home: Path, *, now: float | None = None) -> str:
-    """Make a new code (replaces any older one) and return it for display in the owner's terminal only."""
+def _owner_digest(owner: str) -> str:
+    return hashlib.sha256(owner.encode("utf-8", "replace")).hexdigest()
+
+
+def issue(home: Path, *, now: float | None = None, owner: str = "") -> str:
+    """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
+
+    `owner` (#1416) is a one-time random value that `open` puts only in the link it launches; the window that logs
+    in with it is the owner's own window for this code. Only its SHA-256 is stored (a 32-byte value, not guessable)."""
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     salt = secrets.token_bytes(16)
     record = {"salt": salt.hex(), "hash": _digest(raw, salt).hex(), "expires": (now or time.time()) + CODE_TTL_S}
+    if owner:
+        record["owner"] = _owner_digest(owner)
     path = Path(home) / FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="ascii") as f:
         json.dump(record, f)
     return raw
+
+
+def owner_salt(home: Path, owner: object, *, now: float | None = None) -> str:
+    """Salt of the live code whose owner value is `owner` (#1416), else empty. Never consumes the code."""
+    if not isinstance(owner, str) or not owner:
+        return ""
+    try:
+        record = json.loads((Path(home) / FILE).read_text(encoding="ascii"))
+        want, salt, expires = str(record["owner"]), str(record["salt"]), float(record["expires"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    if (now or time.time()) > expires or not hmac.compare_digest(_owner_digest(owner), want):
+        return ""
+    return salt
 
 
 def consume(home: Path, code: str, *, now: float | None = None) -> bool:

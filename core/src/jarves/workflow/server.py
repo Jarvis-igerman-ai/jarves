@@ -106,6 +106,9 @@ SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
 UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
 UNLOCK_WRONG_TOTAL = 5        # over all sessions, unchanged by #1265: at most 5 guesses of 10,000 per code
+# #1416: once the owner's own window (opened by `jarvis workflow open`) is bound to the code, all other windows
+# together get only the rest, so they cannot cancel the code and the total stays at most 5.
+UNLOCK_WRONG_OTHERS = UNLOCK_WRONG_TOTAL - UNLOCK_WRONG_PER_SESSION
 
 
 @dataclass
@@ -114,6 +117,8 @@ class UnlockWrong:
     salt: str = ""
     total: int = 0
     by_session: dict[str, int] = field(default_factory=dict)
+    owner: str = ""   # #1416: the session that logged in with this code's one-time owner value (first one wins)
+    others: int = 0   # wrong tries from every other session
 
 
 def session_key(token: str, session: str) -> str:
@@ -497,6 +502,13 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.unlock_wrong.salt != salt:
                 self.server.unlock_wrong = UnlockWrong(salt)
             wrong = self.server.unlock_wrong
+            is_owner = bool(wrong.owner) and hmac.compare_digest(wrong.owner, session)
+            if wrong.owner and not is_owner and wrong.others >= UNLOCK_WRONG_OTHERS:
+                # #1416: the rest of the tries belong to the owner's own window; other windows cannot cancel the code.
+                self._json(403, {"error": "this code is kept for the window that 'jarvis workflow open' opened; use it "
+                                 "there, or run 'jarvis workflow unlock' in your own terminal for a new code",
+                                 "locked": True, "reason": "owner_window_only"})
+                return
             if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
                 # No further guess from this session; the code stays live for the owner's other window.
                 self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
@@ -506,6 +518,8 @@ class Handler(BaseHTTPRequestHandler):
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
                 wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
                 wrong.total += 1
+                if not is_owner:
+                    wrong.others += 1
                 if wrong.total >= UNLOCK_WRONG_TOTAL:
                     path.unlink(missing_ok=True)
                     self.server.unlock_wrong = UnlockWrong()
@@ -544,6 +558,12 @@ class Handler(BaseHTTPRequestHandler):
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
             self.server.persist_sessions(now)
+            salt = unlock.owner_salt(self.server.home, data.get("owner"), now=now)
+            if salt:  # #1416: the window `open` launched owns this code's reserved tries (first login only)
+                if self.server.unlock_wrong.salt != salt:
+                    self.server.unlock_wrong = UnlockWrong(salt)
+                if not self.server.unlock_wrong.owner:
+                    self.server.unlock_wrong.owner = session
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 
 
