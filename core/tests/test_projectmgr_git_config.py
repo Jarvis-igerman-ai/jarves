@@ -353,3 +353,57 @@ def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):
     r = gitops.git(repo, "rev-list", "--count", other)
     assert r.stdout.strip() == "2"                         # git may still print its graft-deprecation hint: fine
     assert "warning" not in r.stderr and "unable to access" not in r.stderr     # but no error opening the graft path
+
+
+def _task(tmp_path: Path) -> tuple[Path, Path, Path]:
+    repo, home = _repo(tmp_path), tmp_path / "jhome"
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _br = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    return repo, home, wt
+
+
+def test_an_agent_git_write_between_the_config_read_and_the_command_never_runs(tmp_path, monkeypatch):
+    """#1599: git() reads the config, then git reads it again. An agent's own git in its task folder used to write the
+    owner's shared config (a `git worktree`), so a NEW filter name added in that window ran. The folder's own `.git` is
+    now a private copy: JARVES's git never reads it, so the planted filter is never seen and never runs."""
+    repo, _home, wt = _task(tmp_path)
+    marker = tmp_path / "ran.txt"
+    read, n = gitops.shared_config_overrides, []
+
+    def agent_writes_after_the_read(cwd):                 # the race, made deterministic: a new name every read
+        env = read(cwd)
+        n.append(1)
+        subprocess.run(["git", "config", f"filter.late{len(n)}.clean", _sh(marker)], cwd=wt, check=True)
+        (wt / ".gitattributes").write_text(f"* filter=late{len(n)}\n", encoding="utf-8")
+        return env
+    monkeypatch.setattr(gitops, "shared_config_overrides", agent_writes_after_the_read)
+    (wt / "f.txt").write_text("agent\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "jarves")
+    assert not marker.exists()
+    assert "late" not in (repo / ".git" / "config").read_text(encoding="utf-8")
+    assert gitops.git(wt, "show", "HEAD:f.txt").stdout == "agent\n"            # JARVES's view: the task branch
+    own = subprocess.run(["git", "status", "--porcelain"], cwd=wt, capture_output=True, text=True)
+    assert own.returncode == 0                                                # the agent's own git still works
+
+
+def test_a_task_folder_is_removed_with_its_jarves_link(tmp_path):
+    """#1599: removing a task folder also drops JARVES's link file and the owner repository's worktree entry."""
+    repo, _home, wt = _task(tmp_path)
+    gitops.remove_worktree(str(repo), wt, gitops.task_branch(1, 1, 1))
+    assert not wt.exists() and not gitops.task_link(wt).exists()
+    assert str(wt) not in gitops.git(repo, "worktree", "list").stdout
+
+
+def test_a_folder_from_an_older_install_is_adopted_keeping_its_branch(tmp_path):
+    """#1599: a task folder that is still a plain `git worktree` (older install) gets its own `.git` before use; its
+    commits stay on the task branch."""
+    repo, home = _repo(tmp_path), tmp_path / "jhome"
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, br = gitops.project_root(home, 1) / "wt" / "t1-a1", gitops.task_branch(1, 1, 1)
+    gitops.git(repo, "worktree", "add", "-q", "-b", br, str(wt), gitops.integration_branch(1))
+    (wt / "f.txt").write_text("old\n", encoding="utf-8")
+    gitops.git(wt, "commit", "-qam", "old work", "--no-verify")
+    gitops.adopt_task_folder(str(repo), wt, br)
+    subprocess.run(["git", "config", "filter.late.clean", "x"], cwd=wt, check=True)
+    assert "late" not in (repo / ".git" / "config").read_text(encoding="utf-8")
+    assert gitops.git(wt, "log", "-1", "--format=%s").stdout.strip() == "old work"
