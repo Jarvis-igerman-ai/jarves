@@ -30,35 +30,47 @@ def browser():
             b.close()
 
 
-def _confirm_on_the_page(browser, dash, home, reword):  # noqa: F811
+def _open(browser, dash, home):  # noqa: F811
     p = prefs_mod.Preferences(open_db(home))
     pid = p.suggest(OLD, "I like short answers in the morning", by="voice")["item"]["id"]
     ctx = browser.new_context(viewport={"width": 1440, "height": 800})
+    page = ctx.new_page()
+    posts: list = []
+    page.on("request", lambda r: posts.append(r.post_data_json) if r.url.endswith("/api/prefs/op") else None)
+    page.add_init_script("try{localStorage.setItem('jarves-lang','en')}catch(e){}")
+    page.goto(dash.url + "#/preferences")
+    page.get_by_role("button", name="Confirm, remember it").wait_for(timeout=30000)
+    assert OLD in page.inner_text("main")
+    return ctx, page, p, pid, posts
+
+
+def _click_confirm(page):
+    with page.expect_response(lambda r: r.url.endswith("/api/prefs/op"), timeout=30000) as resp:
+        page.get_by_role("button", name="Confirm, remember it").click()
+    return resp.value.status
+
+
+def test_dashboard_confirm_button_sends_the_shown_words_and_remembers(browser, dash, home):  # noqa: F811
+    ctx, page, p, pid, posts = _open(browser, dash, home)
     try:
-        page = ctx.new_page()
-        posts: list = []
-        page.on("request", lambda r: posts.append(r.post_data_json) if r.url.endswith("/api/prefs/op") else None)
-        page.add_init_script("try{localStorage.setItem('jarves-lang','en')}catch(e){}")
-        page.goto(dash.url + "#/preferences")
-        button = page.get_by_role("button", name="Confirm, remember it")
-        button.wait_for(timeout=30000)
-        assert OLD in page.inner_text("main")
-        if reword:                                             # the model rewords it after the page showed OLD
-            p.edit(pid, NEW, by="voice", repropose=True)
-        with page.expect_response(lambda r: r.url.endswith("/api/prefs/op"), timeout=30000) as resp:
-            button.click()
-        return p, pid, posts, resp.value.status
+        assert _click_confirm(page) == 200 and posts == [{"op": "confirm", "id": pid, "text": OLD}]
+        assert p.for_prompt() == [OLD]
     finally:
         ctx.close()
 
 
-def test_dashboard_confirm_button_sends_the_shown_words_and_remembers(browser, dash, home):  # noqa: F811
-    p, pid, posts, status = _confirm_on_the_page(browser, dash, home, reword=False)
-    assert status == 200 and posts == [{"op": "confirm", "id": pid, "text": OLD}]
-    assert p.for_prompt() == [OLD]
-
-
 def test_dashboard_confirm_button_refuses_a_reword_made_after_the_page_loaded(browser, dash, home):  # noqa: F811
-    p, pid, posts, status = _confirm_on_the_page(browser, dash, home, reword=True)
-    assert status == 409 and posts == [{"op": "confirm", "id": pid, "text": OLD}]
-    assert p.get(pid)["state"] == "proposed" and p.get(pid)["text"] == NEW and p.for_prompt() == []
+    ctx, page, p, pid, posts = _open(browser, dash, home)
+    try:
+        p.edit(pid, NEW, by="voice", repropose=True)               # the model rewords it after the page showed OLD
+        assert _click_confirm(page) == 409 and posts == [{"op": "confirm", "id": pid, "text": OLD}]
+        assert p.get(pid)["state"] == "proposed" and p.get(pid)["text"] == NEW and p.for_prompt() == []
+        # review R1 of #1766: the page reloads the list, shows the NEW words and says why; a second click is a fresh
+        # decision on the words now shown, not another 409
+        page.wait_for_function(f"() => document.querySelector('main').innerText.includes({NEW!r})", timeout=30000)
+        assert page.locator("main b").all_inner_texts() == [NEW]           # the preference shown is the new wording
+        assert "The wording changed meanwhile" in page.inner_text("main")
+        assert _click_confirm(page) == 200 and posts[-1] == {"op": "confirm", "id": pid, "text": NEW}
+        assert p.for_prompt() == [NEW]
+    finally:
+        ctx.close()

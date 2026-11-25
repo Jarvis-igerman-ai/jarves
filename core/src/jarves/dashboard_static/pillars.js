@@ -95,10 +95,19 @@
   }
 
   // ------------------------------------------------------------- Learned preferences
+  let prefNotice = "";
   async function pagePreferences() {
     const d = await api("/api/prefs");
     const msg = msgSpan();
+    if (prefNotice) { msg.textContent = prefNotice; prefNotice = ""; }   // #206 H2: kept across the reload below
     const op = (id, o, extra) => act(msg, () => post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {})));
+    // #206 H2: the words changed after this page loaded (409): reload the list so the NEW words are shown for a fresh
+    // decision, instead of the old words that only ever answer 409 again
+    const confirmShown = (p) => act(msg, () => post("/api/prefs/op", { op: "confirm", id: p.id, text: p.text }).catch((e) => {
+      if (e.code !== "PREF_CONFLICT") throw e;
+      prefNotice = tx("הניסוח השתנה בינתיים. זה הניסוח החדש: אשר אותו רק אם הוא נכון.",
+        "The wording changed meanwhile. These are the new words: confirm them only if they are right.");
+    }));
     const text = el("input", { type: "text", dir: "auto", maxlength: "200", style: "min-width:260px;flex:1", "aria-label": tx("העדפה חדשה", "New preference"),
       placeholder: tx("העדפה שתרצה שאזכור", "A preference you want remembered") });
     const topic = el("select", { "aria-label": tx("נושא", "Topic") }, d.topics.map((t) => el("option", { value: t }, topicText(t))));
@@ -114,7 +123,7 @@
       p.evidence ? el("div", { class: "muted small", dir: "auto" }, tx("מה שאמרת: ", "What you said: ") + p.evidence) : null,
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" }, buttons));
     const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
-    const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => op(p.id, "confirm", { text: p.text }), "primary"),
+    const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => confirmShown(p), "primary"),
       btn(tx("עריכה", "Edit"), edit(p)), btn(tx("לא לזכור", "Do not remember"), () => op(p.id, "decline"))]));
     const items = d.items.map((p) => row(p, [btn(tx("עריכה", "Edit"), edit(p)),
       p.stale ? btn(tx("אישור מחדש", "Reaffirm"), () => op(p.id, "reaffirm"), "primary") : null,

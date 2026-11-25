@@ -227,3 +227,27 @@ async def test_confirm_after_a_conflict_asks_again_and_is_not_replayed(home):
     again = await reg.call("pref_confirm", {"id": pid}, origin="model")
     assert again.ok and "already_done" not in again.data and "cached" not in again.data
     assert [a[1]["details"]["preference"] for a in asked] == [OLD, NEW] and p.for_prompt() == [NEW]
+
+
+async def test_the_real_approval_service_never_binds_words_nobody_was_shown(home):
+    # review R3 of #1766: approval_meta runs before the ask, so the words must count only if a person really answered.
+    # The real ApprovalService has no standing allow: with no place to show the popup it refuses (no_channel) and
+    # nothing is confirmed; with a place (an open dashboard) the owner's yes confirms exactly the words shown there.
+    from types import SimpleNamespace
+    from jarves import approvals as appr
+    p, pid = _proposed(home)
+    svc = appr.ApprovalService(home, timeout_s=5)
+    reg = registry(prefs=p)
+
+    async def ask(prompt, **meta):
+        return await svc.ask(prompt, **meta)
+    ask.accepts_meta = True
+    reg.confirm = ask
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert not r.ok and svc.last_resolution == "no_channel"
+    assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
+    shown: list = []
+    svc.on_ask.append(lambda a: (shown.append(a.details.get("preference")), svc.answer(a.id, True, channel="dashboard")))
+    appr.api_approvals(SimpleNamespace(home=home), None, None)      # an open dashboard page = a place to answer
+    r = await reg.call("pref_confirm", {"id": pid}, origin="user")
+    assert r.ok and shown == [OLD] and p.for_prompt() == [OLD]
