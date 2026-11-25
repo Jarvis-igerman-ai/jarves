@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -101,6 +102,16 @@ _PUSH_URL = re.compile(r"^(?:https://(?i:github\.com)/|ssh://git@(?i:github\.com
                        r"|git@(?i:github\.com):)[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*?(?:\.git)?/?\Z")
 
 
+def _check_push_target(url: str, got: list[str]) -> None:
+    """#1748: the URL(s) git will really push to after the owner's global config (insteadOf, pushInsteadOf, an
+    agent-writable ~/.gitconfig) must be exactly one github.com URL of the same repository as the checked origin."""
+    want = _SLUG.search(url)
+    m = _SLUG.search(got[0]) if len(got) == 1 and _PUSH_URL.match(got[0]) else None
+    if not (m and want and [x.lower() for x in m.group(1, 2)] == [x.lower() for x in want.group(1, 2)]):
+        raise ForgeError("JARVES will not push: your global git config rewrites the origin URL to another target "
+                         f"({', '.join(got)[:200] or 'none'}); remove that url.*.insteadOf/pushInsteadOf rule")
+
+
 def push_branch(path: str, branch: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch).
     #1722: the project's own config is agent-writable (remote.<x>.receivepack/pushurl, url.*.insteadOf, ext::,
@@ -123,7 +134,12 @@ def push_branch(path: str, branch: str) -> None:
         gitops.git(tmp, "init", "-q", "--bare")
         # bytes: a text-mode "\r\n" on Windows would make git read the path as "objects\r" (CI, round 1)
         (Path(tmp) / "objects" / "info" / "alternates").write_bytes((objects + "\n").encode("utf-8"))
-        gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", url, f"{sha}:refs/heads/{branch}",
+        # #1748: a remote of an unguessable name (a global remote."<url>".pushurl would redirect a push to the bare
+        # URL), resolved as git will push it, then checked again. Not covered: a global rule added between the two.
+        name = f"jarves-{secrets.token_hex(8)}"
+        gitops.git(tmp, "config", f"remote.{name}.url", url)
+        _check_push_target(url, gitops.git(tmp, "remote", "get-url", "--push", "--all", name).stdout.splitlines())
+        gitops.git(tmp, "push", "--no-verify", "--recurse-submodules=no", name, f"{sha}:refs/heads/{branch}",
                    timeout=300, ident=False)
     finally:
         try:   # a file git still holds open on Windows must not turn a finished push into a failure (round 3 R2)

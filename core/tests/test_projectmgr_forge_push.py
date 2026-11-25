@@ -30,6 +30,9 @@ def home(tmp_path, monkeypatch):
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
+    real = forge._check_push_target         # #1748: only this harness rewrite to the local bare repository passes
+    monkeypatch.setattr(forge, "_check_push_target",
+                        lambda url, got: real(url, [URL if g == bare.as_posix() else g for g in got]))
     return bare
 
 
@@ -174,3 +177,57 @@ def test_a_failed_temp_cleanup_does_not_fail_the_push(tmp_path, home, monkeypatc
     assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
     for p in seen:
         real(p, ignore_errors=True)
+
+
+def _global(text: str) -> None:
+    with open(Path.home() / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write(text)
+
+
+@pytest.mark.parametrize("rule", ["insteadOf", "pushInsteadOf"])
+def test_a_global_url_rewrite_to_another_target_is_refused(tmp_path, home, rule):
+    """#1748: an agent-writable ~/.gitconfig rewrite of the checked origin URL is refused before anything is pushed."""
+    origin = "https://github.com/o/x.git"
+    repo, _, _ = _setup(tmp_path, origin)
+    evil = tmp_path / "evil.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
+    _global(f"[url \"{evil.as_posix()}\"]\n\t{rule} = {origin}\n")
+    neg = _plain(repo, "push", "origin", BRANCH)
+    assert neg.returncode == 0 and _on(evil), neg.stderr                     # negative control: plain git obeys it
+    subprocess.run(["git", "--git-dir", str(evil), "branch", "-D", BRANCH], check=True, capture_output=True)
+    with pytest.raises(forge.ForgeError, match="rewrites"):
+        forge.push_branch(str(repo), BRANCH)
+    assert not _on(evil)
+
+
+def test_a_global_rewrite_to_another_github_repository_is_refused(tmp_path, home):
+    """#1748: the resolved URL keeps a github.com form but names another repository (refused before any network)."""
+    repo, _, _ = _setup(tmp_path, "https://github.com/o/x.git")
+    _global("[url \"https://github.com/evil/\"]\n\tpushInsteadOf = https://github.com/o/\n")
+    with pytest.raises(forge.ForgeError, match="rewrites"):
+        forge.push_branch(str(repo), BRANCH)
+
+
+def test_a_global_pushurl_for_the_origin_url_is_not_used(tmp_path, home):
+    """#1748: plain `git push <url>` honours a global remote."<url>".pushurl; JARVES pushes through its own remote."""
+    repo, _, _ = _setup(tmp_path)
+    evil = tmp_path / "evil.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
+    _global(f"[remote \"{URL}\"]\n\tpushurl = {evil.as_posix()}\n")
+    neg = _plain(repo, "push", URL, BRANCH)
+    assert _on(evil), neg.stderr                                             # negative control: plain git obeys it
+    subprocess.run(["git", "--git-dir", str(evil), "branch", "-D", BRANCH], check=True, capture_output=True)
+    forge.push_branch(str(repo), BRANCH)
+    assert _on(home) and not _on(evil)
+
+
+@pytest.mark.parametrize("got,ok", [(["git@github.com:o/r.git"], True), (["https://github.com/O/R"], True),
+                                    (["https://github.com/o/other.git"], False), ([], False),
+                                    ([URL, "git@github.com:o/r.git"], False), (["file:///tmp/r.git"], False)])
+def test_check_push_target(got, ok):
+    """#1748: the owner's own same-repository rewrite (https to ssh) still passes; anything else is refused."""
+    if ok:
+        forge._check_push_target(URL, got)
+    else:
+        with pytest.raises(forge.ForgeError, match="rewrites"):
+            forge._check_push_target(URL, got)
