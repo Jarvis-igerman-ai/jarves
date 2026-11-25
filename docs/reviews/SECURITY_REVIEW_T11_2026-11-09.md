@@ -1,14 +1,20 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09 (findings authored); re-checked 2026-11-23; anchors re-mapped 2026-11-25.
-**Pin: every `file:line` reference and every issue state below is as of `main` fae76ae.** Anchors in
+Date: 2026-11-09 (findings authored); re-checked 2026-11-23 on `main` 25f0a54 (line anchors, fix status of #1-#4,
+and the #1408 link protection in #1, the #1613 base32 rule in #4 and the #1578 `at_rest` change in #8); anchors
+re-mapped 2026-11-25.
+**Pin: every `file:line` reference below is as of `main` fae76ae; every issue and PR state is as read on GitHub on
+2026-11-25** (#1096, #1097, #1098 closed; #1099, #1254, #1517 open; #1108 closed unmerged). Anchors in
 `projectmgr/{gitops,service,forge}.py` were re-mapped: since 25f0a54 those files were changed only by PRs #1718
 (`gitops.py`, issue #1390), #1737 (`service.py`, `forge.py`, issue #1722) and #1755 (`gitops.py`, `service.py`, issue
 #1407), per `git log --first-parent 25f0a54..fae76ae` on them. On 2026-11-25 every `projectmgr` anchor below was
-checked against the cited code with `git show fae76ae:<file>`. The other cited files (`goal_plans`, `continuity`,
-`devstatus`, `preferences`, `mobile`, `projectmgr/{engine,runners}`) are byte-identical between 25f0a54 and fae76ae
-(`git diff --stat` empty), so their anchors were kept. The findings text was not otherwise re-checked against the
-newer code, except where a finding says so. "At review time" means only the old 2026-11-09 behaviour, not a line number.
+checked against the cited code with `git show fae76ae:<file>`; spot check, for example:
+`git show fae76ae:core/src/jarves/projectmgr/gitops.py | sed -n 336,341p` (`is_protected`) and
+`git show fae76ae:core/src/jarves/projectmgr/service.py | sed -n 941p` (`HEAD...{sha}`). The other cited files
+(`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`, `projectmgr/{engine,runners}`) are byte-identical
+between 25f0a54 and fae76ae (`git diff --stat` empty), so their anchors were kept. The findings text was not
+otherwise re-checked against the newer code, except where a finding says so. "At review time" means only the old
+2026-11-09 behaviour, not a line number.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`. Also read,
 for #8 only: the `mobile.py` lines that #8 cites (484, 951, 978, 1019, 1133, 1157), not the rest of `mobile.py`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
