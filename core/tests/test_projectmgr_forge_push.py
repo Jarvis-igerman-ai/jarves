@@ -65,7 +65,7 @@ def test_shared_config_commands_never_run_on_a_push(tmp_path, home, key, value):
     neg = _plain(repo, "push", "origin", BRANCH)
     assert neg.returncode != 0 and marker.exists(), neg.stderr               # negative control
     marker.unlink()
-    forge.push_branch(str(repo), BRANCH)
+    forge.push_branch(str(repo), BRANCH, "o/r")
     assert not marker.exists() and _on(home)
     sha = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
     assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
@@ -83,7 +83,7 @@ def test_shared_ssh_command_never_runs(tmp_path, home):
     assert neg.returncode != 0 and marker.exists() and not own.exists(), neg.stderr  # negative control: shared wins
     marker.unlink()
     with pytest.raises(gitops.GitError):
-        forge.push_branch(str(repo), BRANCH)                               # the owner's (stub) ssh refused it
+        forge.push_branch(str(repo), BRANCH, "o/r")                               # the owner's (stub) ssh refused it
     assert own.exists() and not marker.exists()
 
 
@@ -95,7 +95,7 @@ def test_a_non_github_origin_is_refused_before_git_runs(tmp_path, home, origin):
     repo, cmd, marker = _setup(tmp_path)
     gitops.git(repo, "config", "remote.origin.url", origin.format(cmd=cmd))
     with pytest.raises(forge.ForgeError, match="github.com"):
-        forge.push_branch(str(repo), BRANCH)
+        forge.push_branch(str(repo), BRANCH, "o/r")
     assert not marker.exists() and not _on(home)
 
 
@@ -114,7 +114,7 @@ def test_no_reference_transaction_hook_runs_on_the_tracking_ref_update(tmp_path,
     _plain(repo, "update-ref", "refs/x", "HEAD")
     assert marker.exists()                                                   # negative control: plain git runs it
     marker.unlink()
-    forge.push_branch(str(repo), BRANCH)
+    forge.push_branch(str(repo), BRANCH, "o/r")
     assert not marker.exists() and _on(home)
     sha = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
     assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
@@ -132,7 +132,7 @@ def test_a_shallow_clone_is_refused_with_a_clear_error(tmp_path, home):
     repo, _, _ = _setup(tmp_path)
     (repo / ".git" / "shallow").write_bytes((gitops.git(repo, "rev-parse", "HEAD").stdout.strip() + "\n").encode())
     with pytest.raises(forge.ForgeError, match="shallow clone"):
-        forge.push_branch(str(repo), BRANCH)
+        forge.push_branch(str(repo), BRANCH, "o/r")
     assert not _on(home)
 
 
@@ -146,7 +146,7 @@ def test_a_failed_tracking_ref_update_does_not_fail_the_push(tmp_path, home, mon
             raise subprocess.TimeoutExpired("git", 1)
         return real(cwd, *a, **kw)
     monkeypatch.setattr(gitops, "git", git)
-    forge.push_branch(str(repo), BRANCH)
+    forge.push_branch(str(repo), BRANCH, "o/r")
     assert _on(home) and "tracking ref" in caplog.text
 
 
@@ -168,9 +168,56 @@ def test_a_failed_temp_cleanup_does_not_fail_the_push(tmp_path, home, monkeypatc
         seen.append(p)
         raise PermissionError(13, "in use", p)
     monkeypatch.setattr(forge.shutil, "rmtree", rmtree)
-    forge.push_branch(str(repo), BRANCH)
+    forge.push_branch(str(repo), BRANCH, "o/r")
     assert _on(home) and seen and "temporary push repository" in caplog.text
     sha = gitops.git(repo, "rev-parse", BRANCH).stdout.strip()
     assert gitops.git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}").stdout.strip() == sha
     for p in seen:
         real(p, ignore_errors=True)
+
+
+def test_the_shared_config_cannot_redirect_the_push_or_weaken_its_tls(tmp_path, home, monkeypatch):
+    """#1595 (guard): url.*.insteadOf / pushInsteadOf to a foreign host and http.proxy / sslVerify / URL-specific
+    http.<url>.* keys in the shared config never reach the push. The push's own config view is read in its cwd/env."""
+    repo, _, _ = _setup(tmp_path)
+    evil = tmp_path / "evil" / "r.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
+    for k, v in [(f"url.{evil.as_posix()}.insteadOf", URL), (f"url.{evil.as_posix()}.pushInsteadOf", URL),
+                 ("http.proxy", "http://127.0.0.1:9"), ("http.sslVerify", "false"),
+                 ("http.https://github.com/.proxy", "http://127.0.0.1:9"), ("http.https://github.com/.sslVerify",
+                                                                             "false")]:
+        gitops.git(repo, "config", k, v)
+    neg = _plain(repo, "push", "origin", BRANCH)
+    assert neg.returncode == 0 and BRANCH in _branches(evil)                 # negative control: plain push redirected
+    seen, real = [], gitops.git
+
+    def git(cwd, *a, **kw):
+        if a[:1] == ("push",):
+            seen.append(real(cwd, "config", "--list", check=False).stdout.lower())
+        return real(cwd, *a, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    forge.push_branch(str(repo), BRANCH, "o/r")
+    assert _on(home) and seen and "127.0.0.1" not in seen[0] and "sslverify" not in seen[0]
+    assert evil.as_posix().lower() not in seen[0]
+
+
+@pytest.mark.parametrize("origin", ["https://github.com/someone-else/r.git", "git@github.com:o/other.git"])
+def test_the_push_goes_only_to_the_repository_the_owner_pinned(tmp_path, home, origin):
+    """#1595: remote.origin.url is shared (agent-writable) config. A github.com URL of ANOTHER repository (an
+    attacker's, or the owner's own public one) must not receive the owner-identity push."""
+    repo, _, _ = _setup(tmp_path, origin)
+    with pytest.raises(forge.ForgeError, match="o/r"):
+        forge.push_branch(str(repo), BRANCH, "o/r")
+    with pytest.raises(forge.ForgeError, match="pinned"):
+        forge.push_branch(str(repo), BRANCH, "")                             # nothing pinned: refused
+    assert not _on(home)
+
+
+@pytest.mark.parametrize("url", [URL, "https://GitHub.com/O/R", "ssh://git@github.com:22/o/r.git", "git@github.com:o/R/"])
+def test_every_accepted_form_of_the_pinned_repository_matches(url):
+    """#1595: the pin compares owner/repo case-insensitively (as GitHub does), whatever accepted URL form is used."""
+    assert forge._PUSH_URL.match(url) and forge._push_slug(url) == "o/r"
+
+
+def _branches(bare: Path) -> str:
+    return subprocess.run(["git", "--git-dir", str(bare), "branch", "--list"], capture_output=True, text=True).stdout

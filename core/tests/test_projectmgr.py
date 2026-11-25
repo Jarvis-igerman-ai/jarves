@@ -1315,9 +1315,9 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
+        forge.push_branch(str(repo), "main", "o/r")                       # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "jarves/p1/../escape")
+        forge.push_branch(str(repo), "jarves/p1/../escape", "o/r")
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):
@@ -1326,10 +1326,12 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     open_project(m, repo)
     assert m.call("configure", project="demo", github="write", by="voice")["code"] == "CLI_ONLY"
     r = m.call("configure", project="demo", github="write")
-    assert r["ok"] and r["project"]["github"] == "write"
+    assert r["ok"] and r["project"]["github"] == "write" and r["project"]["github_repo"] == "o/r"   # #1595 pin
+    assert "pinned to o/r" in r["text"]
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
+    assert m.call("configure", project="demo", github="off")["project"]["github_repo"] == ""
 
 
 def test_github_status_text_names_the_git_prerequisite(env, monkeypatch):
