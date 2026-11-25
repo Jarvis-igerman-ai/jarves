@@ -603,6 +603,7 @@ def test_ship_names_and_merges_the_commit_the_owner_approved(env):
     finish(m)
     integ = gitops.project_root(home, 1) / "integration"
     sha = sh(integ, "git", "rev-parse", "HEAD").strip()
+    sh(repo, "git", "tag", gitops.integration_branch(1), "HEAD")       # a same-named tag never shadows the branch
     plan = m.call("ship_plan", project="demo")
     assert sha[:12] in plan["text"] and plan["commit"] == sha
     assert all(sha[:12] in c or "jarvis" in c for c in plan["commands"])

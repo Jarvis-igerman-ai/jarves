@@ -280,13 +280,20 @@ def test_signing_programs_from_the_shared_config_fall_back_to_the_owners(tmp_pat
                                 "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultKeyCommand": ""}
 
 
-def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path):
-    """#1407: the real run behind the override above, on the ship path (`merge_in(..., ident=False)`). A `#!/bin/sh`
-    script: Git for Windows runs it through its own sh too. The control run proves the script does run without JARVES."""
-    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
-    prog = tmp_path / "evil-gpg"
-    prog.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\nexit 1\n", encoding="utf-8")
-    prog.chmod(0o755)
+def _script(path: Path, marker: Path) -> str:
+    """A `#!/bin/sh` program that leaves a marker and fails; Git for Windows runs it through its own sh too."""
+    path.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\nexit 1\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path.as_posix()
+
+
+def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path, _owner_home):
+    """#1407: the real run behind the override above, on the ship path (`merge_in(..., ident=False)`). The owner's own
+    gpg program (a failing script, so the result does not depend on the host's gpg or keys) runs instead of the
+    agent's; the control run proves the agent's program does run under plain git."""
+    repo, evil, owner = _repo(tmp_path), tmp_path / "ran.txt", tmp_path / "owner.txt"
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write(f"[gpg]\n\tprogram = {_script(tmp_path / 'owner-gpg', owner)}\n")
     gitops.git(repo, "checkout", "-qb", "side")
     (repo / "s.txt").write_text("s\n", encoding="utf-8")
     gitops.git(repo, "add", "-A")
@@ -295,26 +302,41 @@ def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path):
     (repo / "m.txt").write_text("m\n", encoding="utf-8")
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "main", "--no-verify")
-    _cfg(repo, "gpg.program", prog.as_posix())
+    _cfg(repo, "gpg.program", _script(tmp_path / "evil-gpg", evil))
     _cfg(repo, "commit.gpgsign", "true")
-    subprocess.run(["git", "commit", "--allow-empty", "-qm", "control", "--no-verify"], cwd=repo, capture_output=True)
-    assert marker.exists()                                     # control: plain git runs the agent's program
-    marker.unlink()
-    gitops.merge_in(repo, "side", ident=False)                  # no gpg on PATH may fail the merge; never the agent's
-    assert not marker.exists()
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "control", "--no-verify"], cwd=repo, capture_output=True,
+                   env=gitops.child_env())
+    assert evil.exists() and not owner.exists()                # control: plain git runs the agent's program
+    evil.unlink()
+    out = gitops.merge_in(repo, "side", ident=False)
+    assert len(out) == 1 and out[0].startswith("(not merged:")  # the owner's program failed the signature
+    assert owner.exists() and not evil.exists()
+    assert not (repo / "s.txt").exists()                        # aborted: nothing changed
 
 
 def test_config_hooks_of_every_scope_are_a_no_op(tmp_path, _owner_home):
     """#1407: `hook.<name>.command` (config-defined hooks, newer git) is not stopped by core.hooksPath. Every hook
-    name of any scope gets a command that does nothing; its arguments land in a shell comment. UNVERIFIED on a git
-    with config hooks (CI has git 2.43): this pins the override, not a real hook run."""
-    repo = _repo(tmp_path)
+    name of any scope gets HOOK_NOOP; git runs it through its own shell with the arguments appended, which land in a
+    comment (checked through a git `!` alias, which runs the same way). On a git with config hooks the control commit
+    runs the agent's hook and JARVES's commit does not; git 2.43 (CI) has none, so there only the override is pinned:
+    a real hook run is UNVERIFIED in CI."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
     with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
         f.write("[hook \"mine\"]\n\tcommand = owner-lint\n")
-    _cfg(repo, "hook.evil.command", "evil")
     _cfg(repo, "hook.mine.event", "pre-merge-commit")
+    _cfg(repo, "hook.evil.event", "post-commit")            # --no-verify does not skip it
+    _cfg(repo, "hook.evil.command", _sh(marker, "true"))
     assert _overrides(repo) == {"hook.mine.command": gitops.HOOK_NOOP, "hook.evil.command": gitops.HOOK_NOOP}
-    assert subprocess.run(["sh", "-c", f'{gitops.HOOK_NOOP} "$@"', "hook", "--x", "y"]).returncode == 0
+    noop = subprocess.run(["git", "-c", f"alias.noop=!{gitops.HOOK_NOOP}", "noop", "--x", "y"], cwd=repo,
+                          capture_output=True, env=gitops.child_env())
+    assert noop.returncode == 0
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "control"], cwd=repo, capture_output=True,
+                   env=gitops.child_env())
+    hooks_supported = marker.exists()
+    marker.unlink(missing_ok=True)
+    (repo / "g.txt").write_text("g\n", encoding="utf-8")
+    assert gitops.commit_all(repo, "jarves")
+    assert not marker.exists(), f"config hook ran (config hooks supported: {hooks_supported})"
 
 
 def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):

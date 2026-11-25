@@ -908,7 +908,7 @@ class Manager(StageEngine):
             return err
         br = gitops.integration_branch(p["id"])
         try:                     # #1407: the commit, not the movable branch name, is what the owner sees and gets
-            sha = gitops.git(p["path"], "rev-parse", "--verify", "--end-of-options", f"{br}^{{commit}}").stdout.strip()
+            sha = gitops.git(p["path"], "rev-parse", "--verify", "-q", f"refs/heads/{br}^{{commit}}").stdout.strip()
         except (OSError, gitops.GitError) as e:
             return _res(False, "NO_INTEGRATION", f"no integration commit to ship: {e}"[:300])
         if apply:
