@@ -63,8 +63,10 @@ _SEED_NEAR = 20
 # ("fix api key loader: done") or with a weak word (a bare token or key) only a credential-shaped value counts.
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*(?:key|token)|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
              r"מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
-# Hebrew bare "key" (מפתח, plural מפתחות) with one prefix letter, as a whole word (review 8 R2)
-_WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b|(?<![\u05d0-\u05ea])[הובלמשכ]?מפתח(?:ות)?(?![\u05d0-\u05ea])"
+# Hebrew bare "key" (מפתח, plural מפתחות) with one prefix letter, as a whole word (review 8 R2). It also means
+# "developer", so it counts only with "של/שלי/שלנו" or ":"/"=" right after it (review 9 R2).
+_WEAK_KEY_WORD = (r"\btokens?\b|טוקן|\bkeys?\b|"
+                  r"(?<![\u05d0-\u05ea])[הובלמשכ]?מפתח(?:ות)?(?![\u05d0-\u05ea])(?=\s*[:=]|\s+של(?:י|נו)?(?!\S))")
 # A date, time or quarter ("2026-12-01", "31/12/2026", "10:30am", "Q4-2026") is planning text, not a value (review 6
 # R1). Only real month/day/hour/minute ranges count, so digit groups such as "4821-9933" stay a value (review 7 R1).
 _MD = r"(?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])"
@@ -84,7 +86,8 @@ _NEAR_KEY = (r"(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{32,}|"
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value"; "my"/"שלי" may stand between a strong word and ":"
     rf"(?:{_KEY_WORD})(?:\s+(?:שלי|שלנו))?\s*[:=]\s*\S|"
-    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*{_CRED}|"
+    # one date or shortcut right after ":" does not hide a credential behind it ("key: 12/31 hunter22", review 9 R1)
+    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*(?:(?:{_DATE}|{_HOTKEY})[.,;!?]?\s+)?{_CRED}|"
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword)
     rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+{_CRED}|"
     rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s+(?:{_NEAR_KEY})(?![^\s.,;!?])", re.I)

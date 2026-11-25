@@ -44,6 +44,9 @@ KEYS = [
     # #1099 review 8: R2 the Hebrew bare "key" (מפתח) with a value; R3 a date glued to more text is no date
     "המפתח שלי הוא abc12345",
     "wifi key: 2026-12-01.hunter22",
+    # #1099 review 9 R1: a date or shortcut right after ":" does not hide the credential behind it
+    "wifi key: 12/31 hunter22",
+    "door key = 2026-12-01 Kx7mP2q9",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -92,6 +95,10 @@ PLAIN = [
     "the key is ctrl+space",
     "shortcut key: ctrl+alt",
     "use the key ctrl+shift+k",
+    # #1099 review 9: R2 "המפתח" also means "the developer"; R1 a date then plain words stays planning text
+    "המפתח צריך לתקן: build_v2",
+    "המפתחות של הצוות סיימו: release_v3",
+    "key dates: 2026-12-01 and 2026-12-15",
     "fix api key loader: done",
     "client secret rotation: done",
     "fix key loader in commit 9fceb02d0ae598e95dc970b74767f19372d61af8",   # SHA more than two words after "key"
