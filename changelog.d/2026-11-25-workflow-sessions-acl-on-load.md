@@ -1,0 +1,1 @@
+- Fixed: the workflow server now also sets the owner-only Windows ACL on an existing sessions.json when it loads it at startup (once per process), so a file written before #824 no longer keeps the inherited folder ACL until the next sign-in; a sessions.json that is a symlink is neither tightened nor read (JAR-858, reopened JAR-260).

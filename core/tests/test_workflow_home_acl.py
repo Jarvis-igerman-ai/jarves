@@ -59,3 +59,17 @@ def test_access_token_and_sessions_are_owner_only_after_creation(tmp_path, monke
     server.save_sessions(home, {})
     _assert_owner_only(home / "access.token")
     _assert_owner_only(home / "sessions.json")
+
+
+@pytest.mark.windows_only
+def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monkeypatch):
+    """JAR-858: a sessions.json written before #824 (plain write, inherited ACL) is locked down by the load."""
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    home = tmp_path / "workflow"
+    home.mkdir()
+    old = home / "sessions.json"
+    old.write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    if not any(inherited for _, inherited in _acl(old)[1]):  # the pre-#824 state; a hardened TEMP lacks it
+        pytest.skip("precondition: no inherited ACEs on tmp_path")
+    assert server.load_sessions(home) == {}
+    _assert_owner_only(old)

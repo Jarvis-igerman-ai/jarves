@@ -4,6 +4,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from jarves.workflow import server
 
 
@@ -58,3 +60,38 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     names = [p.name for p in seen]
     assert names.count("access.token") == 2  # created, then existing file tightened once
     assert any(n.startswith("sessions.") for n in names)  # the temp file, locked before it is written
+
+
+def test_existing_sessions_file_is_tightened_on_startup_load(monkeypatch, tmp_path):
+    """JAR-858 (JAR-260 reopened): a sessions.json written before #824 must be locked down when the server
+    loads it at startup, once per process; earlier tests only covered freshly written files."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    assert server.load_sessions(tmp_path) == {}
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == [tmp_path / "sessions.json"]
+
+
+def test_missing_sessions_file_is_not_tightened(monkeypatch, tmp_path):
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == []
+
+
+def test_symlinked_sessions_file_is_not_tightened(monkeypatch, tmp_path):
+    """Review R2: a linked sessions.json is neither tightened (that would rewrite the target's ACL) nor read."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"version": 1, "sessions": {"%s": 150.0}}' % ("a" * 64), encoding="utf-8")
+    try:
+        (tmp_path / "sessions.json").symlink_to(target)
+    except OSError:  # Windows without the symlink privilege
+        pytest.skip("cannot create a symlink here")
+    assert server.load_sessions(tmp_path, now=100.0) == {}
+    assert seen == []
