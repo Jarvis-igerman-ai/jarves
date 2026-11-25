@@ -221,6 +221,7 @@ class StageEngine:
 
     def _ensure_worktree(self, p, t):
         if t["worktree"] and Path(t["worktree"]).exists():
+            gitops.adopt_task_folder(p["path"], Path(t["worktree"]), t["branch"])   # an older install's folder (#1599)
             return Path(t["worktree"]), t["branch"]
         att = max(1, t["attempts"])
         wt, br = gitops.new_task_worktree(self.home, p["path"], p["id"], t["seq"], att)
@@ -716,11 +717,13 @@ class StageEngine:
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))
         at = self._integration_sha(p)[:12] or base                  # the commit, not the movable name (#1469)
+        # the task's commit, read in the owner's repository: a task folder's own `.git` is a private copy (#1599)
+        rev = gitops.git(where, "rev-parse", "HEAD", check=False).stdout.strip()[:12] or "HEAD"
         text = {
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
             "test": f"test task #{t['seq']} yourself (code in {where}), then say pass or fail",
             "verify": f"check that the bug of task #{t['seq']} is fixed (code in {where}), then say pass or fail",
-            "review": f"review task #{t['seq']}: git -C \"{where}\" diff {at}...HEAD, then approve or reject with what "
+            "review": f"review task #{t['seq']}: git -C \"{p['path']}\" diff {at}...{rev}, then approve or reject with what "
                       "to change",
             "merge": f"approve merging task #{t['seq']} into {base}",
             "release": f"release {p['name']} yourself, then say done",

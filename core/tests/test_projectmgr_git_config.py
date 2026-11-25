@@ -402,8 +402,20 @@ def test_a_folder_from_an_older_install_is_adopted_keeping_its_branch(tmp_path):
     wt, br = gitops.project_root(home, 1) / "wt" / "t1-a1", gitops.task_branch(1, 1, 1)
     gitops.git(repo, "worktree", "add", "-q", "-b", br, str(wt), gitops.integration_branch(1))
     (wt / "f.txt").write_text("old\n", encoding="utf-8")
-    gitops.git(wt, "commit", "-qam", "old work", "--no-verify")
+    subprocess.run(["git", "commit", "-qam", "old work", "--no-verify"], cwd=wt, check=True, capture_output=True)
+    with pytest.raises(gitops.GitError, match="older install"):
+        gitops.git(wt, "status")
     gitops.adopt_task_folder(str(repo), wt, br)
     subprocess.run(["git", "config", "filter.late.clean", "x"], cwd=wt, check=True)
     assert "late" not in (repo / ".git" / "config").read_text(encoding="utf-8")
     assert gitops.git(wt, "log", "-1", "--format=%s").stdout.strip() == "old work"
+
+
+def test_a_folder_git_replaced_by_a_link_to_the_owner_repository_is_refused(tmp_path):
+    """#1599: an agent that swaps its private `.git` for a link back to a shared repository would write the owner's
+    config again; JARVES then refuses to run git in that folder."""
+    repo, _home, wt = _task(tmp_path)
+    gitops._rmtree(wt / ".git")
+    (wt / ".git").write_text(f"gitdir: {gitops.task_link(wt).read_text(encoding='utf-8')}\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="replaced by a link"):
+        gitops.commit_all(wt, "jarves")

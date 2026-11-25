@@ -10,13 +10,19 @@ from test_projectmgr import env, finish, open_project, sh, task  # noqa: F401  (
 from jarves.projectmgr import engine, gitops
 
 GIT = ("git", "-c", "user.name=s", "-c", "user.email=s@s")
-COMMIT_EVIL = ("import subprocess as s; open('a.txt','w').write('evil'); "
-               f"s.run({list(GIT)!r} + ['commit', '-qam', 'evil', '--no-verify'], check=True)")
+# #1599: the folder's own `.git` is a private copy, so the move goes through the owner repository's entry (a process
+# that knows it), read from JARVES's pointer next to the folder
+COMMIT_EVIL = ("import os, subprocess as s; d = os.getcwd(); "
+               "g = open(os.path.join(os.path.dirname(d), '.' + os.path.basename(d) + '.gitlink')).read().strip(); "
+               "open('a.txt','w').write('evil'); "
+               f"s.run({list(GIT)!r} + ['commit', '-qam', 'evil', '--no-verify'], check=True, "
+               "env=dict(os.environ, GIT_DIR=g, GIT_WORK_TREE=d))")
 
 
 def _sibling_commit(wt) -> None:
+    """A writer of the shared refs moves the task branch (#1599: the agent's own git in its folder no longer can)."""
     (Path(wt) / "a.txt").write_text("evil")
-    sh(wt, *GIT, "commit", "-qam", "sibling", "--no-verify")
+    gitops.git(wt, "commit", "-qam", "sibling", "--no-verify")
 
 
 def _after_check(m, then) -> None:
@@ -136,7 +142,8 @@ def test_sibling_commit_before_the_owner_approves_is_not_an_owner_edit(env):
     m, repo, home = env
     wt = _owner_task(m, repo, [sys.executable, "-c", "pass"])
     (wt / "mine.txt").write_text("evil\n")
-    sh(wt, *GIT, "commit", "-qam", "sibling", "--no-verify")
+    gitops.git(wt, "add", "-A")
+    gitops.git(wt, "commit", "-qm", "sibling", "--no-verify")
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)

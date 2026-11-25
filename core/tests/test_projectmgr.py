@@ -1420,9 +1420,10 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     t = m.db.by_seq(1, 3)
     integ = gitops.project_root(home, 1) / "integration"
     sha = sh(integ, "git", "rev-parse", "HEAD").strip()
-    assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
-    assert branch not in t["waiting"]
-    sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
+    head = gitops.git(t["worktree"], "rev-parse", "HEAD").stdout.strip()[:12]
+    assert t["status"] == "waiting" and f"diff {sha[:12]}...{head}" in t["waiting"], t["waiting"]
+    assert branch not in t["waiting"] and f'git -C "{repo}"' in t["waiting"]
+    sh(repo, "git", "diff", "--quiet", f"{sha[:12]}...{head}", "--", "b.txt")   # the command works (#1599: owner repo)
 
 
 def test_ship_without_an_integration_commit_says_so(env):

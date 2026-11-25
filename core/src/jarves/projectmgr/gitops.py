@@ -5,14 +5,17 @@ merges are fast-forward only after the check ran on the merged result. JARVES ne
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import threading
 import time
 from pathlib import Path
 
+_log = logging.getLogger(__name__)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
 # files an agent may never change: they would widen the permissions of every later task or run code on its own
@@ -89,10 +92,36 @@ MIN_GIT = (2, 31)                           # GIT_CONFIG_COUNT/KEY/VALUE: older 
 _GIT_OK: list[bool] = []                    # the version check passed once in this process
 
 
+_TASK_NAME = re.compile(r"t\d+-a\d+")
+
+
+def task_link(wt: str | Path) -> Path:
+    """JARVES's pointer to a task folder's entry in the owner's repository (#1599): next to the folder, never in it."""
+    wt = Path(wt)
+    return wt.with_name(f".{wt.name}.gitlink")
+
+
+def _task_env(cwd: str | Path) -> dict[str, str]:
+    """GIT_DIR/GIT_WORK_TREE for a task folder (#1599). The folder's own `.git` is a private copy that the agent's git
+    may write; JARVES's git never reads it, so its config, attributes and hooks never reach JARVES. {} elsewhere.
+    A task folder without the pointer (an older install's `git worktree`) raises until adopt_task_folder ran."""
+    link, wt = task_link(cwd), Path(cwd)
+    own = wt / ".git"
+    if link.is_file() and (own.is_symlink() or own.is_file() or (own / "commondir").exists()):
+        raise GitError(f"task folder {wt.name}: its .git was replaced by a link to a shared repository; JARVES will "
+                       "not run git there (start the stage again)")
+    if link.is_file():
+        return {"GIT_DIR": link.read_text(encoding="utf-8").strip(), "GIT_WORK_TREE": str(wt.resolve())}
+    if _TASK_NAME.fullmatch(wt.name) and wt.parent.name == "wt" and "projects" in wt.parts and wt.exists():
+        raise GitError(f"task folder {wt.name} is a shared worktree from an older install; JARVES will not run git "
+                       "there until it is adopted (start the stage again)")
+    return {}
+
+
 def _run(cwd: str | Path, *argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=30,
-                          creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                          errors="replace")
+                          creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0", **_task_env(cwd)}),
+                          encoding="utf-8", errors="replace")
 
 
 def require_git(cwd: str | Path) -> None:
@@ -184,14 +213,15 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     back to the owner's (#1407); every config-defined hook command is HOOK_NOOP; replace refs and grafts are ignored.
     Not covered: core.sshCommand, core.askPass, credential helpers, transport commands (remote.<x>.uploadpack/
     receivepack, ext:: URLs), core.alternateRefsCommand, a shallow file, and a key added between the config read
-    and the command (one read per call)."""
+    and the command (one read per call). That race needs an agent that can write this config: task folders have
+    their own `.git` and JARVES reads the owner repository's entry for them instead (#1599, _task_env)."""
     if args and args[0].startswith("-"):
         raise GitError(f"git() takes the subcommand first, not the global option {args[0].split('=', 1)[0]}")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "submodule.recurse=false", "-c", "diff.ignoreSubmodules=dirty"]
     env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":",
                      "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": NO_HOOKS,   # #1407: an id is its own content
-                     **shared_config_overrides(cwd)})
+                     **shared_config_overrides(cwd), **_task_env(cwd)})
     if args[:1] in (("diff",), ("show",), ("log",)):   # a blank diff driver fails these; the flags show plain text
         args = (args[0], "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", *args[1:])
     elif args[:1] == ("status",):
@@ -254,7 +284,55 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        adopt_task_folder(repo, wt, br)
     return wt, br
+
+
+def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
+    """#1599: the folder's `.git` link to the owner's repository moves to task_link (outside the folder) and the folder
+    gets a private `.git`: a local clone of the task branch with no remote, for the agent's own git. The agent's git
+    writes only that copy; JARVES commits and merges through the owner's entry, so the copy does not follow them
+    (informational for the agent). An older install's folder is adopted the same way; a config its agent already
+    wrote into the owner's repository stays there (JARVES cannot tell it from the owner's own)."""
+    wt, link = Path(wt), task_link(wt)
+    if link.is_file():
+        return
+    dotgit = wt / ".git"
+    text = dotgit.read_text(encoding="utf-8") if dotgit.is_file() and not dotgit.is_symlink() else ""
+    if not text.startswith("gitdir:"):
+        raise GitError(f"task folder {wt.name} is not a JARVES worktree")
+    gd = Path(text[7:].strip())
+    gd = gd if gd.is_absolute() else (wt / gd).resolve()
+    tmp = wt.with_name(f".{wt.name}.clone")
+    with _repo_lock(repo):
+        _rmtree(tmp)
+        try:
+            git(repo, "clone", "-q", "--no-checkout", "--no-tags", "--single-branch", "-b", branch, str(repo), str(tmp))
+            git(tmp, "remote", "remove", "origin")
+            git(tmp, "reset", "-q")                          # the copy's index = its HEAD; the folder's files stay
+            part = link.with_name(f"{link.name}.{os.getpid()}.{threading.get_ident()}")
+            part.write_text(str(gd), encoding="utf-8")
+            os.replace(part, link)
+            dotgit.unlink()
+            os.replace(tmp / ".git", dotgit)
+        finally:
+            _rmtree(tmp)
+
+
+def _rmtree(path: Path) -> None:
+    """Remove a JARVES folder; on Windows git's read-only object files are made writable first (plain files only,
+    never through a link). What still cannot be removed is logged, not raised."""
+    def again(func, p, exc):
+        if os.name == "nt" and os.path.isfile(p) and not os.path.islink(p):
+            os.chmod(p, stat.S_IWRITE)
+            return func(p)
+        raise exc
+    if not os.path.lexists(path):
+        return
+    try:
+        shutil.rmtree(path, onexc=again)
+    except OSError as e:
+        _log.warning("could not remove %s: %s", path, e)
 
 
 def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
@@ -272,9 +350,9 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
     with _repo_lock(repo):
-        git(repo, "worktree", "remove", "--force", str(wt), check=False)
-        if Path(wt).exists():
-            shutil.rmtree(wt, ignore_errors=True)
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)   # refused for an adopted folder: rmtree
+        _rmtree(Path(wt))
+        task_link(wt).unlink(missing_ok=True)
         git(repo, "worktree", "prune", check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)
