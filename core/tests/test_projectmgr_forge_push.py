@@ -23,8 +23,9 @@ def home(tmp_path, monkeypatch):
     h.mkdir()
     bare = tmp_path / "remote" / "r.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
-    (h / ".gitconfig").write_text(f"[user]\n\tname = O\n\temail = o@example.invalid\n[protocol \"ext\"]\n\tallow = "
-                                  f"always\n[protocol \"https\"]\n\tallow = never\n[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
+    (h / ".gitconfig").write_text(f"[user]\n\tname = O\n\temail = o@example.invalid\n[protocol \"ext\"]\n"
+                                  f"\tallow = always\n[protocol \"https\"]\n\tallow = never\n"
+                                  f"[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
     for k in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(k, str(h))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -238,7 +239,8 @@ def test_check_push_target(got, ok):
 
 
 @pytest.mark.parametrize("got", ["https://u:ghp_secret@github.com/o/r.git", "https://ghp_secret@evil.invalid/o/r",
-                                 "ssh://ghp_secret@github.com/o/r", "ghp_secret@github.com:o/r.git"])
+                                 "ssh://ghp_secret@github.com/o/r", "ghp_secret@github.com:o/r.git",
+                                 "u:ghp_secret@github.com:o/r.git"])
 def test_a_token_in_a_rewritten_url_is_refused_and_not_shown(got):
     """Review R1/R2 (round 2): a token-bearing global insteadOf is refused, and the token is not in the message."""
     with pytest.raises(forge.ForgeError, match="credential helper") as e:

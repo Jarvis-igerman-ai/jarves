@@ -119,7 +119,7 @@ def _check_push_target(url: str, got: list[str]) -> None:
 
 def _no_userinfo(u: str) -> str:
     """Review R1: a token in a rewritten URL (https://user:tok@github.com/) never reaches the error text or logs."""
-    return re.sub(r"^[^/@:]*@", "***@", re.sub(r"(?<=//)[^/]*@", "***@", u))
+    return re.sub(r"^[^/]*@", "***@", re.sub(r"(?<=//)[^/]*@", "***@", u))   # round 3 R2: also "u:tok@host:o/r"
 
 
 def push_branch(path: str, branch: str) -> None:
@@ -147,7 +147,7 @@ def push_branch(path: str, branch: str) -> None:
         # #1748: a remote of an unguessable name (a global remote."<url>".pushurl would redirect a push to the bare
         # URL), resolved as git will push it, then checked again. Not covered (the global config is agent-writable;
         # a JARVES-owned GIT_CONFIG_GLOBAL is a separate design decision): a global rule added between the two,
-        # core.sshCommand, credential helpers, http.proxy / http.<url>.proxy and http.sslVerify=false.
+        # core.sshCommand, credential helpers, http.proxy / http.<url>.proxy and http.sslVerify=false (tracked: #1790).
         name = f"jarves-{secrets.token_hex(8)}"
         gitops.git(tmp, "config", f"remote.{name}.url", url)
         _check_push_target(url, gitops.git(tmp, "remote", "get-url", "--push", "--all", name).stdout.splitlines())
