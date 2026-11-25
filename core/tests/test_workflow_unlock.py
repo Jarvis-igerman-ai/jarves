@@ -306,6 +306,25 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse((self.home / unlock.FILE).exists())          # no code replaced for nothing
         self.assertNotIn("Unlock code", err.getvalue())
 
+    def test_open_probes_the_server_once_so_a_failed_open_issues_no_code_1416(self):
+        out, err = io.StringIO(), io.StringIO()
+        with (patch.object(cli, "owner_only_guard", return_value="terminal"),
+              patch("jarves.workflow.opener.listening", side_effect=[True, False]) as probe,  # stops between probes
+              patch("webbrowser.open", return_value=True),
+              redirect_stdout(out), redirect_stderr(err)):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open"]), 0)
+        self.assertEqual(probe.call_count, 1)                         # one answer decides both the code and the open
+        self.assertIn("Unlock code", err.getvalue())
+
+    def test_owner_compare_never_raises_on_a_non_ascii_binding_1416(self):
+        shown = unlock.issue(self.home, owner="nonce-x")
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login_owner("nonce-x")
+        self.server.unlock_wrong.owner = "é" * 64                  # str compare_digest raises TypeError here
+        self.cookie = ""
+        self.login()
+        self.assertEqual(self.wrong_try(wrong), (403, None))           # an ordinary window, not a 500
+
     def test_a_login_flood_cannot_push_out_the_bound_owner_window_1416(self):
         import time
         from jarves.workflow.server import MAX_SESSIONS

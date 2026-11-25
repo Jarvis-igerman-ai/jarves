@@ -253,7 +253,8 @@ def main(argv=None) -> int:
         from .opener import open_dashboard
         code, owner = "", ""
         # #1416: with the server down, open stops with rc 2 and no window can use a code, so none replaces a live one.
-        if a.no_open or opener.listening(a.port):
+        up = opener.listening(a.port)  # probed once: open_dashboard reuses it, so no code is issued for a failed open
+        if a.no_open or up:
             try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
                 owner_only_guard("open")
                 import secrets
@@ -265,7 +266,7 @@ def main(argv=None) -> int:
                 code = unlock.issue(home, owner=owner)
             except PermissionError:
                 pass
-        rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token, owner=owner)
+        rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token, owner=owner, probe=lambda _p: up)
         if code:
             from . import unlock
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {code}", file=sys.stderr)

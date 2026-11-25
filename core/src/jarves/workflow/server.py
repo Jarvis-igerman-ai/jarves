@@ -117,7 +117,9 @@ class UnlockWrong:
     salt: str = ""
     total: int = 0
     by_session: dict[str, int] = field(default_factory=dict)
-    owner: str = ""   # #1416: the session that logged in with this code's one-time owner value (first one wins)
+    # #1416: the session that logged in with this code's one-time owner value (first one wins). In memory only, like
+    # the counters: a server restart within the code's 5 minutes drops the binding and the #1265 rules apply again.
+    owner: str = ""
     others: int = 0   # wrong tries from every other session
 
 
@@ -502,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.unlock_wrong.salt != salt:
                 self.server.unlock_wrong = UnlockWrong(salt)
             wrong = self.server.unlock_wrong
-            is_owner = bool(wrong.owner) and hmac.compare_digest(wrong.owner, session)
+            is_owner = bool(wrong.owner) and hmac.compare_digest(wrong.owner.encode(), session.encode())  # bytes: no TypeError
             if wrong.owner and not is_owner and wrong.others >= UNLOCK_WRONG_OTHERS:
                 # #1416: the rest of the tries belong to the owner's own window; other windows cannot cancel the code.
                 self._json(403, {"error": "this code is kept for the window that 'jarvis workflow open' opened; use it "
