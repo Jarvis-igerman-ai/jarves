@@ -145,7 +145,7 @@ def test_a_proposed_memory_is_not_used_until_the_owner_says_yes(world):
     item = world.prefs.suggest("Call me Dana", "she said so", "name")
     world.phone("POST", "/api/m/chat", body={"text": "x", "id": "msg-00000004"})
     assert world.brain_saw[-1][1] == ""
-    assert world.owner("POST", "/api/prefs/op", {"op": "confirm", "id": item["item"]["id"]})[0] == 200
+    assert world.owner("POST", "/api/prefs/op", {"op": "confirm", "id": item["item"]["id"], "text": item["item"]["text"]})[0] == 200
     world.phone("POST", "/api/m/chat", body={"text": "y", "id": "msg-00000005"})
     assert "Call me Dana" in world.brain_saw[-1][1]
 
