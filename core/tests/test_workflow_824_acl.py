@@ -1,6 +1,7 @@
 """#824: access.token / sessions.json get an owner-only ACL on Windows (icacls mocked; no real ACL changes)."""
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from pathlib import Path
@@ -160,3 +161,44 @@ def test_concurrent_loads_never_exceed_the_cap(monkeypatch, tmp_path):
     for t in threads:
         t.join(5)
     assert len(seen) == server._TIGHTEN_TRIES
+
+
+def test_no_gave_up_error_when_a_concurrent_attempt_succeeded(monkeypatch, tmp_path, caplog):
+    """JAR-824 review #1761 @54ef83f R1: the last attempt fails while an earlier reserved attempt succeeded;
+    the file is owner-only, so no "gave up" error is logged."""
+    path = tmp_path / "sessions.json"
+    path.write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    key = str(path)
+    tightened: set[str] = set()
+
+    def other_thread_wins_then_fail(p) -> bool:
+        tightened.add(key)  # the concurrent attempt finished first and marked the file done
+        return False
+
+    monkeypatch.setattr(server, "owner_only_file", other_thread_wins_then_fail)
+    monkeypatch.setattr(server, "_TIGHTENED", tightened)
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {key: server._TIGHTEN_TRIES - 1})
+    with caplog.at_level(logging.ERROR, logger=server.__name__):
+        server._tighten_once(path)
+    assert [r for r in caplog.records if "gave up" in r.getMessage()] == []
+
+
+def test_load_sessions_survives_icacls_raising(monkeypatch, tmp_path):
+    """JAR-824 review #1761 @54ef83f R2: the tighten runs before the read's try; an icacls OSError must not
+    break startup, and the stored sessions are still read."""
+    import os
+    import types
+    # Windows only inside server (pathlib on this host keeps its own os.name, so tmp_path stays usable)
+    monkeypatch.setattr(server, "os", types.SimpleNamespace(name="nt", environ=os.environ))
+    monkeypatch.setenv("USERNAME", "alice")
+
+    def boom(*a, **k):
+        raise FileNotFoundError("icacls")
+
+    monkeypatch.setattr(server.subprocess, "run", boom)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
+    digest = "a" * 64
+    (tmp_path / "sessions.json").write_text(json.dumps({"version": 1, "sessions": {digest: 1060.0}}),
+                                            encoding="utf-8")
+    assert server.load_sessions(tmp_path, now=1000.0) == {digest: 1060.0}

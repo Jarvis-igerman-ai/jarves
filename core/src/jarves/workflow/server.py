@@ -87,12 +87,13 @@ def _tighten_once(path: Path) -> None:
         if key in _TIGHTENED or attempt > _TIGHTEN_TRIES:
             return
         _TIGHTEN_FAILS[key] = attempt  # reserved; kept as a failure unless this attempt succeeds
-    ok = owner_only_file(path)
+    ok = owner_only_file(path)  # never raises: icacls errors come back as False (test_fail_safe_never_raises)
     with _TIGHTEN_LOCK:
         if ok:
             _TIGHTENED.add(key)
             return
-    if attempt == _TIGHTEN_TRIES:
+        gave_up = attempt == _TIGHTEN_TRIES and key not in _TIGHTENED  # a concurrent attempt may have succeeded
+    if gave_up:
         logging.getLogger(__name__).error(
             "gave up setting an owner-only ACL on %s after %d attempts; it may keep the folder ACL until restart",
             path.name, attempt)
