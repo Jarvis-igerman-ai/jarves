@@ -42,6 +42,7 @@ LATER_S = 24 * 3600                      # "later" = ask again after a day
 BACKOFF_S = (3600, 4 * 3600, 12 * 3600)  # wait after failure 1, 2, 3
 GIVE_UP_AFTER = 3                        # failures per version, then stop and tell the owner once
 PROBE_STUCK_S = 24 * 3600                # probe_error this long: tell the owner once (it may never clear by itself)
+PROBE_ERROR = "probe_error"               # busy reason: a busy probe raised, so the install waits (fail closed)
 TICK_S = 600                             # how often the Core looks (the update check itself is cached for a day)
 
 CHOICES = ("now", "later", "off")
@@ -349,7 +350,7 @@ class AutoUpdater:
                 return held
             reasons = list(self.busy() or [])
             st["busy"] = reasons
-            self._watch_probe_error(st, "probe_error" in reasons, now, ver, disp)
+            self._watch_probe_error(st, PROBE_ERROR in reasons, now, ver, disp)
             if reasons:
                 _save(self.home, st)
                 return "busy"
@@ -549,12 +550,12 @@ def status_lines(s: dict) -> list[str]:
     if kind in NEXT_TEXT and s.get("next_at"):
         he, en = NEXT_TEXT[kind]
         out.append(clilang.fmt(he.format(t=_local(s["next_at"])), en.format(t=_local(s["next_at"]))))
-    if "probe_error" in (s.get("busy") or []):     # JAR-316: say why it waits in plain words, not the raw key
-        out.append(clilang.fmt("בדיקת 'האם ג'רביס בשימוש' נכשלת, אז העדכון ממתין עד שהיא תעבוד (הפעלה מחדש של JARVES "
-                               "בדרך כלל עוזרת). להתקין בכל זאת, אחרי שבדקת שאין אישור שממתין לך: jarvis update auto now",
-                               "The 'is JARVES in use' check is failing, so the update waits until it works (restarting "
-                               "JARVES usually helps). To install anyway, after checking that no approval is waiting "
-                               "for you: jarvis update auto now"))
+    if kind == "quiet_moment" and PROBE_ERROR in (s.get("busy") or []):   # JAR-316/709: only while due and waiting
+        out.append(clilang.fmt("בדיקת 'האם ג'רביס בשימוש' נכשלת, אז העדכון ממתין עד שהיא תעבוד. "
+                               "להתקין בכל זאת, אחרי שבדקת שאין אישור שממתין לך: jarvis update auto now",
+                               "The 'is JARVES in use' check is failing, so the update waits until it works. "
+                               "To install anyway, after checking that no approval is waiting for you: "
+                               "jarvis update auto now"))
     r = s.get("last_result") or {}
     if r.get("version"):
         t = _local(float(r.get("ts") or 0))
@@ -607,7 +608,7 @@ def core_busy(core) -> list[str]:
     probe("agents", "coding_agent", agents)
     probe("quiet", "quiet_hours", lambda: core.ops.alerts.quiet_now() or core.ops.alerts.paused())
     if failed:
-        out.append("probe_error")
+        out.append(PROBE_ERROR)
     return out
 
 

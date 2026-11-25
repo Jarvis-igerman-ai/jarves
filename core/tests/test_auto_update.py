@@ -506,6 +506,19 @@ def test_busy_probe_error_is_explained_in_plain_words(home, server, keys, monkey
     assert not [x for x in auto_update.status_lines(r.au.status()) if "jarvis update auto now" in x]
 
 
+def test_busy_probe_error_line_is_not_shown_while_snoozed(home, server, keys, monkeypatch):
+    """JAR-709: a stale `busy` from an earlier look must not explain a wait the owner's 'later' caused."""
+    from jarves import clilang
+    monkeypatch.setattr(clilang, "current", lambda: "both")
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=[auto_update.PROBE_ERROR])
+    r.ready()
+    assert r.tick() == "busy" and r.au.status()["busy"] == [auto_update.PROBE_ERROR]
+    r.au.answer("later")
+    assert r.tick() == "snoozed"
+    assert not [x for x in auto_update.status_lines(r.au.status()) if "jarvis update auto now" in x]
+
+
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:
         cfg = Config()
