@@ -74,15 +74,16 @@ def _base32(text: str) -> bool:
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
              r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
 _KEY_VALUE = re.compile(
-    # "keyword: value" / "keyword = value" with at most two words between
-    rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
+    # "keyword: value" / "keyword = value" with at most two words between; a bare count ("tokens: 4000") is no value
+    rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*(?!\d+(?![^\s.,;!?]))\S|"
     # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword, a bare "key" included) the
     # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, so state words such as
     # "expired", "rotated" or "well-known" stay allowed; a letters-only value counts from 16 letters (a passphrase)
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
     r"(?:(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}|[A-Za-z]{16,})|"
-    # a value pasted right after the keyword: one 6+ character word with both letters and digits ("api key abc123")
-    rf"(?:{_KEY_WORD}|\bkeys?\b)\s+(?=[^\s.,;!?]*[A-Za-z])(?=[^\s.,;!?]*\d)[^\s.,;!?]{{6,}}", re.I)
+    # a value pasted after the keyword, at most two words later: one 6+ character word with both letters and digits
+    # ("api key abc123", "the token for prod a1b2c3d4e5", "הטוקן שלי abc12345")
+    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,2}}?\s+(?=[^\s.,;!?]*[A-Za-z])(?=[^\s.,;!?]*\d)[^\s.,;!?]{{6,}}", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
 # and neither is a camelCase name built from words of 2+ lowercase letters and numbers of up to four digits, so a

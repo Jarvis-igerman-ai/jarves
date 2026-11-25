@@ -28,6 +28,9 @@ KEYS = [
     "my api key is correcthorsebattery",
     "my api key abc123",
     "token x9y8z7w6",
+    # #1099 review 2 R1: up to two words between the keyword and a pasted letters+digits value
+    "the token for prod a1b2c3d4e5",
+    "הטוקן שלי abc12345",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -62,7 +65,12 @@ PLAIN = [
     "the token is automatically refreshed",
     "rename token v2 handler",
     "refactor parseReport2024QuarterlyTotals in reports",
+    # #1099 review 2 R2: a count after "tokens:" is not a value
+    "limit tokens: 4000 per day",
 ]
+# Accepted over-refusal (fails closed, review 2 R2/R3): a word after "token:" and a long upper-case letter+digit code
+# are refused; the owner can rephrase ("fix the token refresh bug") and order numbers are not preferences.
+OVER_REFUSED = ["fix token: refresh bug", "ORDER2024INVOICE12345"]
 
 
 @pytest.mark.parametrize("text", KEYS)
@@ -73,6 +81,11 @@ def test_key_and_token_shaped_text_is_sensitive(text):
 @pytest.mark.parametrize("text", PLAIN)
 def test_ordinary_preferences_are_not_sensitive(text):
     assert not prefs_mod.looks_sensitive(text)
+
+
+@pytest.mark.parametrize("text", OVER_REFUSED)
+def test_documented_over_refusal_stays_refused(text):
+    assert prefs_mod.looks_sensitive(text)
 
 
 def test_non_string_input_does_not_crash():
