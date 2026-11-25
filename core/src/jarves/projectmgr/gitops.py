@@ -170,9 +170,10 @@ def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
     return env
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
+    env_extra: more environment for git only (forge.push_branch: GIT_CONFIG_GLOBAL, #1790).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
@@ -191,7 +192,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
            "-c", "submodule.recurse=false", "-c", "diff.ignoreSubmodules=dirty"]
     env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":",
                      "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": NO_HOOKS,   # #1407: an id is its own content
-                     **shared_config_overrides(cwd)})
+                     **shared_config_overrides(cwd), **(env_extra or {})})
     if args[:1] in (("diff",), ("show",), ("log",)):   # a blank diff driver fails these; the flags show plain text
         args = (args[0], "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", *args[1:])
     elif args[:1] == ("status",):
