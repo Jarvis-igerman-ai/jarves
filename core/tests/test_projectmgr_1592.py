@@ -83,6 +83,19 @@ def test_overlapping_guards_keep_the_first_baseline(wt):
     assert a and _shared(wt) == before
 
 
+def test_the_planting_run_fails_even_when_another_run_exits_first(wt):
+    """Review 2 R1: A and B overlap, B plants, A exits first: both fail, B is not let through."""
+    before = _shared(wt)
+    a, b = [], []
+    ga, gb = gitops.shared_git_guard(wt, a), gitops.shared_git_guard(wt, b)
+    ga.__enter__()
+    gb.__enter__()
+    subprocess.run([sys.executable, "-c", PLANT], cwd=wt, check=True)
+    ga.__exit__(None, None, None)
+    gb.__exit__(None, None, None)
+    assert "config" in a and "config" in b and _shared(wt) == before
+
+
 def test_a_file_that_cannot_be_restored_still_fails_the_check(wt, monkeypatch):
     def deny(*_a):
         raise PermissionError("denied")
@@ -153,3 +166,26 @@ def test_an_owner_hook_symlink_is_re_created(wt):
     code = f"import os;p={str(link)!r};os.unlink(p);open(p,'w').write('#!/bin/sh\\ntouch pwned\\n')"
     ok, out = gitops.run_check(wt, [sys.executable, "-c", code])
     assert not ok and link.is_symlink() and os.readlink(link) == "../../scripts/pre-commit"
+
+
+def test_a_rewritten_worktree_commondir_fails_and_is_restored(wt):
+    """Review 2 R2: `worktrees/<n>/commondir` and `gitdir` redirect git like the pointer does."""
+    gd = Path((wt / ".git").read_text(encoding="utf-8").split("gitdir:", 1)[1].strip())
+    files = {f: (gd / f).read_bytes() for f in ("commondir", "gitdir")}
+    code = f"import pathlib;d=pathlib.Path({str(gd)!r});[(d/f).write_text('/elsewhere\\n') for f in ('commondir','gitdir')]"
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", code])
+    assert not ok and f"worktrees/{gd.name}/commondir" in out and f"worktrees/{gd.name}/gitdir" in out
+    assert {f: (gd / f).read_bytes() for f in files} == files
+
+
+def test_a_worktree_made_during_a_run_is_not_taken_as_planted(wt, tmp_path):
+    c: list[str] = []
+    with gitops.shared_git_guard(wt, c):
+        w2, _ = gitops.new_task_worktree(tmp_path, str(tmp_path / "repo"), 1, 1, 1)
+    assert c == [] and (w2 / ".git").is_file() and gitops.git(w2, "status").returncode == 0
+
+
+def test_the_message_never_hides_an_entry_that_was_not_restored():
+    """Review 2 R6: the length cap cuts restored entries, never a NOT restored one."""
+    msg = gitops.shared_git_message("the check", [f"hooks/h{i:03}" for i in range(80)] + ["config (NOT restored: x)"])
+    assert "config (NOT restored: x)" in msg and msg.endswith("more") and len(msg) < 560

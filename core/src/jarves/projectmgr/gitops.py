@@ -383,12 +383,17 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
 # (`hooks`, `info`, `worktrees/<n>`) must stay real folders: a symlink in their place is removed. Runs overlapping on
 # one repository share the first run's snapshot, so a later run never takes a planted file as its baseline. Not
 # covered: a write during the run seen by git before the restore, other files of the git dir (refs, objects), a second
-# JARVES process, a worktree made before this process started (its common dir comes from its pointer). A config change
-# the owner makes during a run is also restored (and reported): the guard cannot tell who wrote it.
-_GUARD: dict[str, list] = {}               # common dir -> [runs inside, {relative path: snapshot}]
+# JARVES process, a worktree made before this process started (its common dir comes from its pointer), files behind
+# a `hooks` folder that is already a symlink when the first run starts (the link itself is guarded, its target is not),
+# the owner's global config (`~/.gitconfig`, `$XDG_CONFIG_HOME/git/config`), and a grandchild process (a test worker,
+# a shell the agent started) that outlives the run and writes after the restore. A config change the owner makes
+# during a run is also restored (and reported): the guard cannot tell who wrote it. Every run active on the
+# repository when a change is found fails, so a run that planted it never passes because another run exited first.
+_GUARD: dict[str, list] = {}               # common dir -> [runs inside, {relative path: snapshot}, [changed lists]]
 _GUARD_LOCK = threading.Lock()
 _PINNED: dict[str, Path] = {}              # worktree -> the shared git dir, read from the owner's repository
 _DIRS = ("hooks", "info", "worktrees")
+_WT_FILES = ("config.worktree", "commondir", "gitdir")   # commondir/gitdir redirect git like the `.git` pointer
 
 
 def _key(path: str | Path) -> str:
@@ -396,9 +401,20 @@ def _key(path: str | Path) -> str:
 
 
 def _pin(wt: Path, repo: str | Path) -> None:
+    """Pin the worktree's shared git dir. A worktree JARVES just made while runs are active joins their snapshot,
+    so its own `worktrees/<n>` files are not taken as planted (and are guarded from now on)."""
     p = _run(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if p.returncode == 0 and p.stdout.strip():
-        _PINNED[_key(wt)] = Path(p.stdout.strip())
+    if p.returncode != 0 or not p.stdout.strip():
+        return
+    common = _PINNED[_key(wt)] = Path(p.stdout.strip())
+    m = re.match(r"gitdir:\s*(.+)", (Path(wt) / ".git").read_text(encoding="utf-8", errors="replace")) \
+        if (Path(wt) / ".git").is_file() else None
+    with _GUARD_LOCK:
+        g = _GUARD.get(_key(common))
+        if g and m:
+            for f in _WT_FILES:
+                n = f"worktrees/{Path(m.group(1).strip()).name}/{f}"
+                g[1][n] = _snap(common / n)
 
 
 def _real_dir(path: Path) -> bool:
@@ -413,7 +429,7 @@ def _guarded(common: Path) -> list[str]:
     names = [*_DIRS, "config", "config.worktree", "info/attributes"]
     if _real_dir(common / "worktrees"):
         for d in sorted((common / "worktrees").iterdir()):
-            names += [f"worktrees/{d.name}/config.worktree"] if _real_dir(d) else [f"worktrees/{d.name}"]
+            names += [f"worktrees/{d.name}/{f}" for f in _WT_FILES] if _real_dir(d) else [f"worktrees/{d.name}"]
     if _real_dir(common / "hooks"):
         names += [f"hooks/{h.name}" for h in sorted((common / "hooks").iterdir()) if not _real_dir(h)]
     return names
@@ -486,8 +502,9 @@ def shared_git_guard(wt: str | Path, changed: list[str]):
     key = _key(common) if common else ""
     if common:
         with _GUARD_LOCK:
-            g = _GUARD.setdefault(key, [0, {}])
+            g = _GUARD.setdefault(key, [0, {}, []])
             g[0] += 1
+            g[2].append(changed)
             for n in _guarded(common):     # a file new since the first run's snapshot is not in it: it was absent
                 g[1].setdefault(n, _snap(common / n) if g[0] == 1 else None)
     try:
@@ -499,10 +516,14 @@ def shared_git_guard(wt: str | Path, changed: list[str]):
                 try:
                     if ptr_base is not None and _snap(ptr) != ptr_base:
                         _put_back(ptr, ptr_base, ".git (worktree pointer)", changed)
+                    found: list[str] = []
                     for n in dict.fromkeys([*_DIRS, *sorted(set(g[1]) | set(_guarded(common)))]):   # folders first
                         if _changed(n, _snap(common / n), g[1].get(n)):
-                            _put_back(common / n, g[1].get(n), n, changed)
+                            _put_back(common / n, g[1].get(n), n, found)
+                    for c in g[2]:                 # every active run fails, the one that planted it included
+                        c.extend(x for x in found if x not in c)
                 finally:
+                    g[2][:] = [c for c in g[2] if c is not changed]
                     g[0] -= 1
                     if not g[0]:
                         del _GUARD[key]
@@ -536,7 +557,14 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
 
 
 def shared_git_message(who: str, changed: list[str]) -> str:
-    return f"{who} changed the shared git dir (restored): {', '.join(changed)}"[:300]
+    """Entries that were NOT restored come first, so the length cap never hides one; the cap says how many it cut."""
+    items = sorted(changed, key=lambda x: "NOT restored" not in x)
+    text = f"{who} changed the shared git dir (restored): "
+    for i, x in enumerate(x[:200] for x in items):
+        if len(text) + len(x) > 500:
+            return text + f"... and {len(items) - i} more"
+        text += x + ", " if i < len(items) - 1 else x
+    return text
 
 
 def repo_state(path: str) -> dict:
