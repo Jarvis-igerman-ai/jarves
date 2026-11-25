@@ -25,6 +25,7 @@ def open_dashboard(home: Path, port: int, *, show_link: bool, token: Callable[[P
     """Open the dashboard. The token link is printed only on explicit request (--no-open).
 
     `owner` (#1416) is the one-time value that binds the code shown in this terminal to the window opened here.
+    It goes only into the link handed to the browser, never into the printed --no-open link.
 
     Exit codes: 0 opened/printed, 1 no browser could be started, 2 no dashboard server listens.
     """
@@ -34,7 +35,7 @@ def open_dashboard(home: Path, port: int, *, show_link: bool, token: Callable[[P
     extra = f"&owner={owner}" if owner else ""
     if show_link:
         # Explicit request (scripts, another device): print the private link. Never share it publicly.
-        print(f"http://{HOST}:{port}/#token={token(home)}{extra}")
+        print(f"http://{HOST}:{port}/#token={token(home)}")
         if not up:
             print(f"Note: no dashboard server answers on port {port} yet. Start it with: jarvis workflow supervise",
                   file=sys.stderr)

@@ -252,13 +252,54 @@ class UnlockTests(unittest.TestCase):
     def test_open_issues_the_code_bound_to_the_link_it_launches_1416(self):
         links = []
         out, err = io.StringIO(), io.StringIO()
-        with patch.object(cli, "owner_only_guard", return_value="terminal"),                 patch("jarves.workflow.opener.listening", return_value=True),                 patch("webbrowser.open", side_effect=lambda url: links.append(url) or True),                 redirect_stdout(out), redirect_stderr(err):
+        with (patch.object(cli, "owner_only_guard", return_value="terminal"),
+              patch("jarves.workflow.opener.listening", return_value=True),
+              patch("webbrowser.open", side_effect=lambda url: links.append(url) or True),
+              redirect_stdout(out), redirect_stderr(err)):
             self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open"]), 0)
         self.assertEqual(len(links), 1)
         owner = links[0].split("&owner=", 1)[1]
         self.assertTrue(unlock.owner_salt(self.home, owner))
         self.assertNotIn(owner, out.getvalue() + err.getvalue())       # the owner value is not printed
         self.assertIn("Unlock code", err.getvalue())
+
+    def test_open_no_open_prints_no_owner_value_and_binds_nothing_1416(self):
+        out, err = io.StringIO(), io.StringIO()
+        with (patch.object(cli, "owner_only_guard", return_value="terminal"),
+              patch("jarves.workflow.opener.listening", return_value=True),
+              patch("webbrowser.open", side_effect=AssertionError("--no-open must not launch a browser")),
+              redirect_stdout(out), redirect_stderr(err)):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]), 0)
+        self.assertIn("#token=", out.getvalue())
+        self.assertNotIn("owner=", out.getvalue() + err.getvalue())   # a printed link never carries the owner value
+        self.assertIn("Unlock code", err.getvalue())
+        record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
+        self.assertNotIn("owner", record)                              # no binding: the #1265 rules apply
+
+    def test_printed_link_never_carries_an_owner_value_1416(self):
+        from jarves.workflow.opener import open_dashboard
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            open_dashboard(self.home, 1, show_link=True, token=lambda h: "t", probe=lambda p: True, owner="secret-v")
+        self.assertNotIn("secret-v", out.getvalue())
+
+    def test_a_login_flood_cannot_push_out_the_bound_owner_window_1416(self):
+        import time
+        from jarves.workflow.server import MAX_SESSIONS
+        shown = unlock.issue(self.home, owner="nonce-flood")
+        owner_cookie = self.login_owner("nonce-flood")
+        bound = self.server.unlock_wrong.owner
+        end = time.time() + 3600
+        for n in range(MAX_SESSIONS - len(self.server.sessions)):     # a token holder fills every session slot
+            self.server.sessions[f"{n:064x}"] = end
+        self.server.attempts.clear()
+        self.cookie = ""
+        self.assertEqual(self.request("/api/session", {"token": self.server.token})[0], 429)  # refused, nobody evicted
+        self.assertIn(bound, self.server.sessions)
+        self.assertEqual(self.server.unlock_wrong.owner, bound)
+        self.cookie = owner_cookie
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()
