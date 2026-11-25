@@ -1483,6 +1483,17 @@ def test_owner_review_adopts_an_older_install_folder_first(env):
     assert t["status"] == "waiting" and t["waiting"].startswith("review task #1"), (t["status"], t["waiting"])
     assert (wt / ".git").is_dir()
 
+def test_ship_without_an_integration_commit_says_so(env):
+    """#1407: ship resolves the integration commit first; with no such branch it refuses instead of merging a name."""
+    m, repo, home = env
+    open_project(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    if integ.exists():
+        sh(repo, "git", "worktree", "remove", "--force", str(integ))
+    sh(repo, "git", "branch", "-D", gitops.integration_branch(1))
+    for apply in (False, True):
+        assert m.call("ship_plan", project="demo", apply=apply, yes=True)["code"] == "NO_INTEGRATION"
+
 
 def test_a_restarted_manager_knows_each_project_repository_from_its_record(env):
     """#1599 review R6: JARVES finds a task folder's owner repository only from its own records. A new manager

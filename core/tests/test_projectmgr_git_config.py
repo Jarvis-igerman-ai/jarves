@@ -423,7 +423,8 @@ def test_a_folder_git_replaced_by_a_link_to_the_owner_repository_is_refused(tmp_
 
 def test_a_pointer_planted_next_to_the_folder_never_redirects_jarves_git(tmp_path):
     """#1599 review R1: JARVES finds a task folder's entry from the owner repository it recorded, never from a file
-    the agent can write. A planted `.t1-a1.gitlink` naming the agent's own repository changes nothing."""
+    in or next to the folder. A file planted next to the folder that names the agent's own repository (here
+    `.t1-a1.gitlink`, any name works the same) changes nothing."""
     repo, _home, wt = _task(tmp_path)
     evil = wt.parent / "evil"
     subprocess.run(["git", "init", "-q", str(evil)], check=True)

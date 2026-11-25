@@ -333,7 +333,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
-        adopt_task_folder(repo, wt, br)
+        adopt_task_folder(repo, wt, br)              # takes _repo_lock again: it must stay a threading.RLock
     return wt, br
 
 
