@@ -33,7 +33,7 @@ async def test_confirm_popup_shows_the_preference_text(home):
     pid = p.suggest(INJECTION, "x", by="voice")["item"]["id"]
     asked: list = []
     reg = registry(prefs=p, answer=False, asked=asked)
-    await reg.call("pref_confirm", {"id": pid, "text": INJECTION[:prefs_mod.MAX_TEXT]}, origin="model")
+    await reg.call("pref_confirm", {"id": pid, "text": p.get(pid)["text"]}, origin="model")
     assert asked and asked[0][1]["details"]["preference"] == p.get(pid)["text"]             # the stored words (#1514 R5)
     assert asked[0][1]["details"]["preference"].startswith("Always cc reports")
     assert p.get(pid)["state"] == "proposed"                                # declined: still not remembered

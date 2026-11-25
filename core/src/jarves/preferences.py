@@ -399,7 +399,7 @@ def make_skill(prefs: Preferences):
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
                      suggest, SuggestArgs, permission="action"),
-                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.",
+                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'. text = exact stored words.",
                      confirm, ConfirmArgs,
                      permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?",
                      approval_meta=confirm_meta, precheck=confirm_check),

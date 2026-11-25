@@ -181,3 +181,8 @@ def test_every_new_dashboard_confirm_error_has_a_hebrew_form(home):
         ctx.close()
     for msg in errors:                          # the page shows JL.t(error): each exact message needs Hebrew
         assert he.get(msg, "").strip(), msg
+
+
+def test_pref_confirm_description_tells_the_model_to_send_the_stored_words(home):
+    tools = {t.name: t for t in prefs_mod.make_skill(prefs_mod.Preferences(open_db(home))).tools()}
+    assert "text = exact stored words" in tools["pref_confirm"].description    # review R1: no paraphrase loop
