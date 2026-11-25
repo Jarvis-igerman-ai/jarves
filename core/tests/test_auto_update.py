@@ -489,6 +489,36 @@ def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
         assert "jarvis update install" in text and "Updates" in text
 
 
+def test_busy_probe_error_is_explained_in_plain_words(home, server, keys, monkeypatch):
+    """JAR-316 review #1306: `jarvis update auto status` says why it waits (HE+EN) and the override, not the raw key."""
+    from jarves import clilang
+    monkeypatch.setattr(clilang, "current", lambda: "both")
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    assert r.tick() == "busy" and r.launched == []
+    lines = auto_update.status_lines(r.au.status())
+    extra = [x for x in lines if "jarvis update auto now" in x]
+    assert len(extra) == 1 and "no approval is waiting" in extra[0] and "אין אישור שממתין" in extra[0]
+    assert "probe_error" not in " ".join(lines)
+    r.au.answer("now")                                   # the owner's explicit choice still installs
+    assert r.tick() == "installing" and len(r.launched) == 1
+    assert not [x for x in auto_update.status_lines(r.au.status()) if "jarvis update auto now" in x]
+
+
+def test_busy_probe_error_line_is_not_shown_while_snoozed(home, server, keys, monkeypatch):
+    """JAR-709: a stale `busy` from an earlier look must not explain a wait the owner's 'later' caused."""
+    from jarves import clilang
+    monkeypatch.setattr(clilang, "current", lambda: "both")
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=[auto_update.PROBE_ERROR])
+    r.ready()
+    assert r.tick() == "busy" and r.au.status()["busy"] == [auto_update.PROBE_ERROR]
+    r.au.answer("later")
+    assert r.tick() == "snoozed"
+    assert not [x for x in auto_update.status_lines(r.au.status()) if "jarvis update auto now" in x]
+
+
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:
         cfg = Config()
