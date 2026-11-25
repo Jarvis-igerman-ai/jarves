@@ -63,7 +63,8 @@ _SEED_NEAR = 20
 # a credential-shaped one, so "tokens: 5 left" or "fix token refresh: done" stay allowed (review 4, R1/R4).
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*(?:key|token)|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
              r"מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
-_WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b"
+# "key result(s)/point(s)" is OKR goal wording, not a credential (review 5 R3)
+_WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b(?!\s+(?:results?|points?)\b)"
 # a credential-shaped value: 6+ characters with a digit or a non-hyphen symbol, so state words such as "expired",
 # "rotated" or "well-known" are not values
 _CRED = r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}"
@@ -88,8 +89,14 @@ def _entropy(s: str) -> float:
     return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
 
 
+def _path_word(p: str) -> bool:
+    # a lowercase part counts as a path word only with at most two digits, so "k3j9x2m8q7" is no path (review 5 R1)
+    return (not p or p.isalpha() or p.isdigit() or bool(_CAMEL.fullmatch(p))
+            or (p.islower() and sum(map(str.isdigit, p)) < 3))
+
+
 def _pathlike(m: str) -> bool:
-    return "/" in m and all(not p or p.islower() or p.isdigit() or _CAMEL.fullmatch(p) for p in m.split("/"))
+    return "/" in m and all(map(_path_word, m.split("/")))
 
 
 def _keylike(text: str) -> bool:

@@ -29,6 +29,8 @@ KEYS = [
     "wifi key = Kx7mP2q9",
     "the tokens: 9xK2mQ7p",
     "remember Zx9f/Q2LmB7v/T4kRw8YpN3sHd+",
+    # #1099 review 5 R1: a lowercase alphanumeric token with "/" is not a path
+    "remember k3j9x2m8q7/p4z1w6v5b0n2",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -63,6 +65,9 @@ PLAIN = [
     "tokens: 5 left",
     "the key: under the mat",
     "see core/src/jarves/hebrew2parts/voice3module for it",
+    # #1099 review 5 R3: OKR-style goal text is not a key
+    "key result: Q4-2026 revenue",
+    "key points: Q4-2026 plan",
 ]
 
 
