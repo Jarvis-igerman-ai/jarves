@@ -334,8 +334,9 @@ def make_skill(prefs: Preferences):
                 if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
                 # #1514: confirm only the words the approval popup showed. confirm_meta records them on this same args
-                # object (SkillRegistry._call passes one instance to _authorize and _run). No recorded words = refuse:
-                # fail closed, never confirm by id alone.
+                # object (SkillRegistry._call passes one instance to _authorize and _run; that is the only path to this
+                # handler, and _authorize runs approval_meta for every origin because this tool always has `confirm`).
+                # No recorded words = refuse on purpose: fail closed, never confirm by id alone.
                 if a._shown is None:
                     logs.warn("prefs", "PREF_CONFIRM_UNSHOWN", "confirm without shown words: not applied", id=a.id)
                     return ToolResult(False, "the owner was not shown the wording: nothing saved; ask again",
@@ -460,13 +461,13 @@ def api_pref_op(ctx, m, body):
             return 200, {"item": p.edit(pid, str(b.get("text", "")), by="dashboard")}
         if op == "remove":
             return 200, {"ok": p.remove(pid, by="dashboard")}
-    except ValueError as e:
-        return 400, {"error": str(e)}
-    except KeyError:
-        return 404, {"error": "no such preference"}
-    except PrefConflict:
+    except PrefConflict:                      # before ValueError: a conflict must stay a 409, whatever its base class
         return 409, {"error": "the preference changed meanwhile: reload the page to see the new wording",
                      "code": "PREF_CONFLICT"}
+    except KeyError:
+        return 404, {"error": "no such preference"}
+    except ValueError as e:
+        return 400, {"error": str(e)}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
 
 
