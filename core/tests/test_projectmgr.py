@@ -1426,6 +1426,31 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     sh(repo, "git", "diff", "--quiet", f"{sha[:12]}...{head}", "--", "b.txt")   # the command works (#1599: owner repo)
 
 
+def test_owner_review_never_names_the_owner_head_when_the_task_commit_is_unknown(env, monkeypatch):
+    """#1599 review R2: the review command runs `git -C <owner repo>`, so a fallback `HEAD` there is the owner's
+    commit, not the task's. A failed rev-parse of the task folder stops the task instead of asking for that diff."""
+    import sys
+    m, repo, _home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner review:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    (Path(t["worktree"]) / "mine.txt").write_text("by hand\n")
+    real = gitops.git
+
+    def refused(cwd, *args, **kw):                                    # only the owner-stage lookup fails
+        if args == ("rev-parse", "HEAD") and sys._getframe(1).f_code.co_name == "_owner_stage":
+            if kw.get("check", True):
+                raise gitops.GitError("refused folder")
+            return subprocess.CompletedProcess(args, 128, "", "refused folder")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", refused)
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert "...HEAD" not in (t["waiting"] or "") and t["status"] == "failed", (t["status"], t["waiting"])
+
 def test_ship_without_an_integration_commit_says_so(env):
     """#1407: ship resolves the integration commit first; with no such branch it refuses instead of merging a name."""
     m, repo, home = env

@@ -139,7 +139,10 @@ def _task_env(cwd: str | Path) -> dict[str, str]:
     directly) is not contained. Refused: a task folder whose `.git` is a link to a shared repository (an older
     install's `git worktree`, or a replaced `.git`) until adopt_task_folder ran, and a folder of an unknown project."""
     wt = Path(cwd)
-    if not (_TASK_NAME.fullmatch(wt.name) and wt.parent.name == "wt" and "projects" in wt.parts and wt.exists()):
+    root = wt.parent.parent                       # project_root(home, pid) = <home>/projects/<pid> (review R5)
+    layout = root.name.isdigit() and root.parent.name == "projects"   # unregistered JARVES folders fail closed
+    if not (_TASK_NAME.fullmatch(wt.name) and wt.parent.name == "wt" and wt.exists()
+            and (layout or _key(root) in _PROJECTS)):
         return {}
     if not _private_git(wt):
         raise GitError(f"task folder {wt.name}: its .git links to a shared repository (an older install or a "

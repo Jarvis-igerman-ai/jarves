@@ -454,7 +454,8 @@ def test_a_failed_git_swap_puts_the_link_back(tmp_path, monkeypatch):
     real = gitops.os.replace
 
     def fail_the_swap(src, dst):
-        if str(src).endswith(".clone/.git"):
+        src = Path(src)                                       # path parts, not "/": Windows passes "\\" (review R1)
+        if src.name == ".git" and src.parent.name.endswith(".clone"):
             raise OSError("locked")
         return real(src, dst)
     monkeypatch.setattr(gitops.os, "replace", fail_the_swap)
@@ -497,3 +498,17 @@ def test_a_git_folder_whose_real_path_is_elsewhere_is_refused(tmp_path, monkeypa
                         lambda p, **k: str(tmp_path / "elsewhere") if str(p) == own else real(p, **k))
     with pytest.raises(gitops.GitError, match="replaced .git"):
         gitops.commit_all(wt, "jarves")
+
+
+def test_an_owner_repository_that_looks_like_a_task_folder_is_not_refused(tmp_path):
+    """#1599 review R5: only <home>/projects/<pid>/wt/t<n>-a<n> (or a registered project's wt) is a task folder; an
+    owner repository at e.g. ~/projects/x/wt/t1-a1 is plain git, not "belongs to no registered project"."""
+    own = tmp_path / "projects" / "x" / "wt" / "t1-a1"
+    own.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(own)], check=True)
+    assert gitops.git(own, "status", "--porcelain").returncode == 0
+    jarves = tmp_path / "home" / "projects" / "7" / "wt" / "t1-a1"     # JARVES's own layout, never registered
+    jarves.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(jarves)], check=True)
+    with pytest.raises(gitops.GitError, match="no registered project"):
+        gitops.git(jarves, "status")
