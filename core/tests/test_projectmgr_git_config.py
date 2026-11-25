@@ -2,6 +2,7 @@
 own git calls. An agent can write `.git/config`, an included file and `.git/info/attributes` (no commit needed)."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -260,3 +261,69 @@ def test_a_git_older_than_2_31_is_refused(monkeypatch, tmp_path):
     with pytest.raises(gitops.GitError, match=r"git 2\.31 or later \(found: 2\.30\)"):
         gitops.git(tmp_path, "status")
     assert calls == [["git", "version"]]                                           # nothing else ran
+
+
+def _overrides(repo: Path) -> dict[str, str]:
+    env = gitops.shared_config_overrides(repo)
+    return {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env.get("GIT_CONFIG_COUNT", 0)))}
+
+
+def test_signing_programs_from_the_shared_config_fall_back_to_the_owners(tmp_path, _owner_home):
+    """#1407: ship merges with the owner's signing (ident=False), so a `gpg.*program` / `gpg.ssh.defaultKeyCommand`
+    the shared config names would run there. The owner's global value wins, else git's default program."""
+    repo = _repo(tmp_path)
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write("[gpg \"x509\"]\n\tprogram = owner-gpgsm\n")
+    for k in ("gpg.program", "gpg.x509.program", "gpg.ssh.program", "gpg.ssh.defaultKeyCommand"):
+        _cfg(repo, k, "evil")
+    assert _overrides(repo) == {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "owner-gpgsm",
+                                "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultKeyCommand": ""}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="an executable shell script as gpg.program")
+def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path):
+    """#1407: the real run behind the override above, on the ship path (`merge_in(..., ident=False)`)."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    prog = tmp_path / "evil-gpg"
+    prog.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\nexit 1\n", encoding="utf-8")
+    prog.chmod(0o755)
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "s.txt").write_text("s\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "main", "--no-verify")
+    _cfg(repo, "gpg.program", str(prog))
+    _cfg(repo, "commit.gpgsign", "true")
+    gitops.merge_in(repo, "side", ident=False)                  # no gpg on PATH may fail the merge; never the agent's
+    assert not marker.exists()
+
+
+def test_config_hooks_of_every_scope_are_a_no_op(tmp_path, _owner_home):
+    """#1407: `hook.<name>.command` (config-defined hooks, newer git) is not stopped by core.hooksPath. Every hook
+    name of any scope gets a command that does nothing; its arguments land in a shell comment. UNVERIFIED on a git
+    with config hooks (CI has git 2.43): this pins the override, not a real hook run."""
+    repo = _repo(tmp_path)
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write("[hook \"mine\"]\n\tcommand = owner-lint\n")
+    _cfg(repo, "hook.evil.command", "evil")
+    _cfg(repo, "hook.mine.event", "pre-merge-commit")
+    assert _overrides(repo) == {"hook.mine.command": gitops.HOOK_NOOP, "hook.evil.command": gitops.HOOK_NOOP}
+    assert subprocess.run(["sh", "-c", f'{gitops.HOOK_NOOP} "$@"', "hook", "--x", "y"]).returncode == 0
+
+
+def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):
+    """#1407: ship merges a commit id; `git replace` (refs/replace, agent-writable) or `.git/info/grafts` would make
+    that id mean other content. JARVES's git ignores both."""
+    repo = _repo(tmp_path)
+    tip = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "f.txt").write_text("other\n", encoding="utf-8")
+    gitops.git(repo, "commit", "-qam", "other", "--no-verify")
+    other = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    subprocess.run(["git", "replace", tip, other], cwd=repo, check=True)
+    assert gitops.git(repo, "show", f"{tip}:f.txt").stdout == "base\n"
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{other}\n", encoding="utf-8")   # `other` without a parent
+    assert gitops.git(repo, "rev-list", "--count", other).stdout.strip() == "2"

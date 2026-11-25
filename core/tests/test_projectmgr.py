@@ -593,6 +593,35 @@ def test_ship_apply_merges_into_owner_branch_after_approval(env):
     assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
+def test_ship_names_and_merges_the_commit_the_owner_approved(env):
+    """#1407: the ship prompt and plan name the integration COMMIT, and ship merges exactly that commit even when an
+    agent moves the integration branch while the approval waits."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = gitops.project_root(home, 1) / "integration"
+    sha = sh(integ, "git", "rev-parse", "HEAD").strip()
+    plan = m.call("ship_plan", project="demo")
+    assert sha[:12] in plan["text"] and plan["commit"] == sha
+    assert all(sha[:12] in c or "jarvis" in c for c in plan["commands"])
+    assert not any(" merge " in c or " push" in c for c in plan["commands"])    # a raw git runs the shared config
+    seen = []
+
+    def approve_then_move(prompt, **_):
+        seen.append(prompt)
+        (integ / "late.txt").write_text("late\n")
+        sh(integ, "git", "add", "late.txt")
+        sh(integ, "git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "late")
+        return True
+
+    m._ask = approve_then_move
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and sha[:12] in seen[0] and sha[:12] in r["text"]
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)
