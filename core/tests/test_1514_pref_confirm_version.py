@@ -87,6 +87,25 @@ async def test_a_suggestion_longer_than_the_cap_is_stored_capped_and_both_confir
     assert p.confirm(pid2, by="dashboard", expect=p.get(pid2)["text"])["item"]["state"] == "confirmed"
 
 
-def test_the_text_required_message_has_hebrew():
+def test_the_dashboard_error_messages_have_hebrew():
     from jarves import locale_parts
-    assert "confirm needs the text you saw: reload the page" in locale_parts.catalog("he")["dict"]
+    he = locale_parts.catalog("he")["dict"]
+    assert "confirm needs the text you saw: reload the page" in he
+    assert "the preference changed meanwhile: reload the page" in he
+
+
+async def test_a_plain_confirm_callback_without_meta_still_binds_the_shown_words(home):
+    # R1: approval_meta runs for pref_confirm whatever the confirm callback is, so a plain confirm(prompt) still works
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(OLD, "I prefer short answers", "voice")["item"]["id"]
+    reg, prompts = SkillRegistry(), []
+
+    async def plain(prompt):
+        prompts.append(prompt)
+        return True
+    reg.confirm = plain
+    reg.register(prefs_mod.make_skill(p))
+    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
+    assert reg.get("pref_confirm").confirm and reg.get("pref_confirm").approval_meta is not None
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert prompts and r.ok and p.get(pid)["state"] == "confirmed"
