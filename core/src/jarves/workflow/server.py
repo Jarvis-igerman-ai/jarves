@@ -205,6 +205,7 @@ class Server(ThreadingHTTPServer):
     def persist_sessions(self, now: float) -> None:
         """Drop expired sessions and store digests of the rest. Caller holds session_lock."""
         self.sessions = {s: end for s, end in self.sessions.items() if end > now}
+        self.login_no = {s: n for s, n in self.login_no.items() if s in self.sessions}  # #1416: pruned with sessions
         self.restored = {k: end for k, end in self.restored.items() if end > now}
         digests = dict(self.restored)
         digests.update({session_key(self.token, s): end for s, end in self.sessions.items()})
@@ -563,7 +564,6 @@ class Handler(BaseHTTPRequestHandler):
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
             self.server.logins += 1
-            self.server.login_no = {s: n for s, n in self.server.login_no.items() if s in self.server.sessions}
             self.server.login_no[session] = self.server.logins
             self.server.persist_sessions(now)
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})

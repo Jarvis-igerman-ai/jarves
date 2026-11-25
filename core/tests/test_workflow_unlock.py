@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -178,6 +179,10 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))  # no 4th guess, even a right one
         self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])  # names both ways out
         self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives
+        self.cookie = ""
+        self.login()                                                   # a fresh owner window opened after the 6 tries
+        self.assertEqual(self.wrong_try(shown), (200, None))          # only 3 tries counted, so it is not too new
+        shown = unlock.issue(self.home)
         self.cookie = owner                                            # #1416: a window opened before the wrong tries
         self.server.unlock_attempts.clear()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
@@ -234,6 +239,14 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, None)] * 2)   # counted, not too new
         self.assertEqual(self.server.unlock_wrong.by_session.get(sid), 2)
         self.assertEqual(self.wrong_try(shown), (200, None))
+
+    def test_expired_sessions_leave_no_login_number_1416(self):
+        self.login()
+        first = next(iter(self.server.sessions))
+        with self.server.session_lock:
+            self.server.sessions[first] = time.time() - 1                # the window expires
+            self.server.persist_sessions(time.time())
+        self.assertNotIn(first, self.server.login_no)                  # pruned with the session, not at the next login
 
     def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
