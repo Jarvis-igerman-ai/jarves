@@ -43,7 +43,7 @@ async def test_voice_confirm_without_a_shown_approval_is_not_applied(home):
     reg, _ = _registry(p)
     tool = next(t for s in reg.skills.values() for t in s.tools() if t.name == "pref_confirm")
     r = await tool.handler(prefs_mod.ConfirmArgs(id=pid))             # the handler run without the approval step
-    assert not r.ok and r.code == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
+    assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
 
 
 def test_dashboard_confirm_carries_the_shown_words(home):
@@ -65,7 +65,10 @@ def test_dashboard_confirm_carries_the_shown_words(home):
         ctx.close()
 
 
-def test_dashboard_page_sends_the_listed_text_with_confirm():
-    from pathlib import Path
-    js = (Path(prefs_mod.__file__).parent / "dashboard_static" / "pillars.js").read_text(encoding="utf-8")
-    assert 'op: "confirm", id: p.id, text: p.text' in js
+async def test_user_origin_confirm_also_runs_the_approval_and_binds_its_words(home):
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(OLD, "I prefer short answers", "voice")["item"]["id"]
+    reg, asked = _registry(p, during_approval=lambda: p.edit(pid, NEW, by="voice", repropose=True))
+    r = await reg.call("pref_confirm", {"id": pid}, origin="user")
+    assert asked[0]["details"]["preference"] == OLD and not r.ok and r.code == "PREF_CONFLICT"
+    assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []

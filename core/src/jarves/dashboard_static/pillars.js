@@ -116,7 +116,7 @@
     const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
     // #1514: the confirm carries the words shown; if they changed meanwhile (409) the page reloads with the new words
     const confirm = (p) => () => act(msg, () => post("/api/prefs/op", { op: "confirm", id: p.id, text: p.text })
-      .catch((e) => { if (/changed meanwhile/.test(String(e && e.message))) return; throw e; }));
+      .catch((e) => { if (!e || e.code !== "PREF_CONFLICT") throw e; }));   // resolved: act() reloads the page
     const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), confirm(p), "primary"),
       btn(tx("עריכה", "Edit"), edit(p)), btn(tx("לא לזכור", "Do not remember"), () => op(p.id, "decline"))]));
     const items = d.items.map((p) => row(p, [btn(tx("עריכה", "Edit"), edit(p)),

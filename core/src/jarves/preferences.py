@@ -336,7 +336,7 @@ def make_skill(prefs: Preferences):
                 if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
                 if a._shown is None:          # #1514: no approval showed the words, so there is nothing the owner saw
-                    return ToolResult(False, "the owner was not shown the words: ask again", code="PREF_CONFLICT")
+                    return ToolResult(False, "the owner was not shown the words: ask again", code="PREF_NOT_SHOWN")
                 try:
                     r = prefs.confirm(a.id, by="voice", expect=a._shown)
                 except KeyError:
@@ -448,7 +448,7 @@ def api_pref_op(ctx, m, body):
             seen = b.get("text")          # #1514: confirm only the words the page showed
             if not isinstance(seen, str) or not seen.strip():
                 return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
-            return 200, p.confirm(pid, by="dashboard", expect=seen[:400])
+            return 200, p.confirm(pid, by="dashboard", expect=seen[:MAX_TEXT])
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":
