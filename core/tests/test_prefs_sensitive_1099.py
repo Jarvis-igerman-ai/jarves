@@ -24,6 +24,10 @@ KEYS = [
     "the token for my work github account is abc12345",
     "my openai key is abc12345",
     "Remember aB3xY7qL9mN2pR5tV8wZ1kC4",                                # random mixed case, not camelCase words
+    # #1099 review R1: a letters-only passphrase after "is", and a short value pasted right after the keyword
+    "my api key is correcthorsebattery",
+    "my api key abc123",
+    "token x9y8z7w6",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -53,6 +57,11 @@ PLAIN = [
     "rename handleOAuth2CallbackResponse in the auth module",
     "call getUserPreferences2Async on start",
     "the key is under the mat",
+    # #1099 review R1/R2: short state words, a short version tag, and a camelCase name with a year are not keys
+    "the api key is compromised",
+    "the token is automatically refreshed",
+    "rename token v2 handler",
+    "refactor parseReport2024QuarterlyTotals in reports",
 ]
 
 
