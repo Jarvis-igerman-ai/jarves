@@ -76,7 +76,9 @@ _DRIVER_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process|required)|merge
 # (#1407) programs git runs to sign (the ship merge uses the owner's signing): owner value, else git's default program
 _GPG_KEYS = {"gpg.program": "openpgp", "gpg.openpgp.program": "openpgp", "gpg.x509.program": "x509",
              "gpg.ssh.program": "ssh", "gpg.ssh.defaultkeycommand": "sshkey"}
-_GPG_DEFAULT = {"openpgp": "gpg", "x509": "gpgsm", "ssh": "ssh-keygen", "sshkey": ""}   # "" = no key command
+# "" for the key command: git treats an empty value as no command (checked on git 2.43: an ssh-signed commit with a
+# user.signingKey still works, nothing runs); without a key git then fails with its own error, closed
+_GPG_DEFAULT = {"openpgp": "gpg", "x509": "gpgsm", "ssh": "ssh-keygen", "sshkey": ""}
 _GPG_OUT = {"openpgp": ("gpg.program", "gpg.openpgp.program"), "x509": ("gpg.x509.program",),
             "ssh": ("gpg.ssh.program",), "sshkey": ("gpg.ssh.defaultKeyCommand",)}
 _HOOK_KEY = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)   # config-defined hooks (newer git): not stopped by core.hooksPath

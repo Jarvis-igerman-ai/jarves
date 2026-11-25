@@ -900,9 +900,12 @@ class Manager(StageEngine):
         return _res(True, "ok", f"Last {hours:g} h in {p['name']}: " + (", ".join(
             f"#{t['seq']} {t['status']}" for t in fin) or "nothing finished"), tasks=[self._view(t) for t in fin])
 
-    def ship_plan(self, project: str = "", apply: bool = False, yes: bool = False, by: str = "owner", **_) -> dict:
+    def ship_plan(self, project: str = "", apply: bool = False, yes: bool = False, by: str = "owner", commit: str = "",
+                  **_) -> dict:
         """What the agents built and how to take it. apply=True (PC only, asks first) merges it into the branch your
-        project folder is on; only when that folder has no uncommitted changes. Never pushes."""
+        project folder is on; only when that folder has no uncommitted changes. Never pushes. commit: the integration
+        commit the owner reviewed in the plan (7+ hex chars); apply refuses when the branch moved since (#1407), and
+        yes=True (no prompt that shows the commit) needs it."""
         p, err = self._need_project(project)
         if err:
             return err
@@ -912,6 +915,13 @@ class Manager(StageEngine):
         except (OSError, gitops.GitError) as e:
             return _res(False, "NO_INTEGRATION", f"no integration commit to ship: {e}"[:300])
         if apply:
+            want = (commit or "").strip().lower()
+            if want and (len(want) < 7 or not sha.startswith(want)):
+                return _res(False, "MOVED", f"the integration branch is now at {sha[:12]}, not the commit {want[:12]} "
+                                            "you reviewed: look at the plan again (jarvis project ship)", commit=sha)
+            if yes and not want:
+                return _res(False, "NEED_COMMIT", "with --yes, name the commit you reviewed: --commit <sha> from "
+                                                  "jarvis project ship", commit=sha)
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
@@ -933,7 +943,7 @@ class Manager(StageEngine):
             stat = "unknown"
         # no raw git merge/push here: in your folder it would run hooks and commands from the shared .git/config,
         # which agents can write; JARVES's own ship merges the commit with them neutralised
-        cmds = [f"jarvis project ship --project \"{p['name']}\" --apply   # merges commit {sha[:12]}, asks first"]
+        cmds = [f"jarvis project ship --project \"{p['name']}\" --apply --commit {sha}"]   # refuses if the branch moved
         return _res(True, "ok", f"{p['name']}: integration commit {sha[:12]} ({br}) has {stat}. JARVES never pushes; "
                                 "a plain git merge or push in your folder runs hooks and commands from its shared "
                                 ".git/config, which agents can write.", branch=br, commit=sha, worktree=str(wt),

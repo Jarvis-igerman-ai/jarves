@@ -606,8 +606,16 @@ def test_ship_names_and_merges_the_commit_the_owner_approved(env):
     sh(repo, "git", "tag", gitops.integration_branch(1), "HEAD")       # a same-named tag never shadows the branch
     plan = m.call("ship_plan", project="demo")
     assert sha[:12] in plan["text"] and plan["commit"] == sha
-    assert all(sha[:12] in c or "jarvis" in c for c in plan["commands"])
     assert not any(" merge " in c or " push" in c for c in plan["commands"])    # a raw git runs the shared config
+    import argparse
+    import shlex
+    from jarves.projectmgr import surfaces
+    argv = shlex.split(plan["commands"][0].split("   #")[0])
+    assert argv[0] == "jarvis"                      # the installed command (packaging/windows/jarvis.cmd)
+    cli = argparse.ArgumentParser()
+    surfaces.add_cli(cli.add_subparsers())
+    a = cli.parse_args(argv[1:])                    # the real parser of `jarvis project`
+    assert (a.action, a.project, a.apply, a.commit) == ("ship", "demo", True, sha)
     seen = []
 
     def approve_then_move(prompt, **_):
@@ -618,9 +626,13 @@ def test_ship_names_and_merges_the_commit_the_owner_approved(env):
         return True
 
     m._ask = approve_then_move
-    r = m.call("ship_plan", project="demo", apply=True)
+    assert m.call("ship_plan", project="demo", apply=True, yes=True)["code"] == "NEED_COMMIT"
+    r = m.call("ship_plan", project="demo", apply=True, commit=sha)
     assert r["ok"] and sha[:12] in seen[0] and sha[:12] in r["text"]
     assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+    moved = m.call("ship_plan", project="demo", apply=True, yes=True, commit=sha)   # the branch moved after the plan
+    assert moved["code"] == "MOVED" and moved["commit"] != sha and not (repo / "late.txt").exists()
+    assert m.call("ship_plan", project="demo", apply=True, yes=True, commit=sha[:6])["code"] == "MOVED"   # too short
 
 
 def test_new_task_on_a_done_project_continues_it(env):

@@ -2,7 +2,6 @@
 own git calls. An agent can write `.git/config`, an included file and `.git/info/attributes` (no commit needed)."""
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -351,4 +350,6 @@ def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):
     assert gitops.git(repo, "show", f"{tip}:f.txt").stdout == "base\n"
     (repo / ".git" / "info").mkdir(exist_ok=True)
     (repo / ".git" / "info" / "grafts").write_text(f"{other}\n", encoding="utf-8")   # `other` without a parent
-    assert gitops.git(repo, "rev-list", "--count", other).stdout.strip() == "2"
+    r = gitops.git(repo, "rev-list", "--count", other)
+    assert r.stdout.strip() == "2"                         # git may still print its graft-deprecation hint: fine
+    assert "warning" not in r.stderr and "unable to access" not in r.stderr     # but no error opening the graft path
