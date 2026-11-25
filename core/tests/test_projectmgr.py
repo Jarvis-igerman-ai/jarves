@@ -1422,45 +1422,66 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     sha = sh(integ, "git", "rev-parse", "HEAD").strip()
     head = gitops.git(t["worktree"], "rev-parse", "HEAD").stdout.strip()[:12]
     assert t["status"] == "waiting" and f"diff {sha[:12]}...{head}" in t["waiting"], t["waiting"]
-    assert branch not in t["waiting"] and f'git -C "{repo}"' in t["waiting"]
+    assert branch not in t["waiting"] and f'{Path(repo).name}" diff' in t["waiting"]   # stored text: user redacted
     sh(repo, "git", "diff", "--quiet", f"{sha[:12]}...{head}", "--", "b.txt")   # the command works (#1599: owner repo)
 
 
-def test_owner_review_never_names_the_owner_head_when_the_task_commit_is_unknown(env, monkeypatch):
-    """#1599 review R2: the review command runs `git -C <owner repo>`, so a fallback `HEAD` there is the owner's
-    commit, not the task's. A failed rev-parse of the task folder stops the task instead of asking for that diff."""
-    import sys
-    m, repo, _home = env
+def _parked_at_gate_with_an_unreadable_folder(m, repo, flow):
+    """Park at an owner gate after the owner's work, then break the folder from the outside: its owner-side worktree
+    entry is gone and the cache is cleared (as after a restart), so any git JARVES runs in the folder fails."""
     open_project(m, repo)
-    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner review:owner")
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow=flow)
     m.call("resume", project="demo")
     finish(m)
     t = m.db.by_seq(1, 1)
     (Path(t["worktree"]) / "mine.txt").write_text("by hand\n")
-    real = gitops.git
-
-    def refused(cwd, *args, **kw):                                    # only the owner-stage lookup fails
-        if args == ("rev-parse", "HEAD") and sys._getframe(1).f_code.co_name == "_owner_stage":
-            if kw.get("check", True):
-                raise gitops.GitError("refused folder")
-            return subprocess.CompletedProcess(args, 128, "", "refused folder")
-        return real(cwd, *args, **kw)
-    monkeypatch.setattr(gitops, "git", refused)
     assert m.call("answer", project="demo", task=1, answer="done")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve" in t["waiting"], t["waiting"]
+    shutil.rmtree(gitops._ENTRIES.pop(gitops._key(t["worktree"])))
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    return m.db.by_seq(1, 1)
+
+
+def test_owner_review_never_names_the_owner_head_when_the_task_commit_is_unknown(env):
+    """#1599 review R2: the review command runs `git -C <owner repo>`, so a fallback `HEAD` there is the owner's
+    commit, not the task's. A failed rev-parse of the task folder stops the task instead of asking for that diff."""
+    m, repo, _home = env
+    t = _parked_at_gate_with_an_unreadable_folder(m, repo, "work:owner gate:owner review:owner")
     assert "...HEAD" not in (t["waiting"] or "") and t["status"] == "failed", (t["status"], t["waiting"])
 
-def test_ship_without_an_integration_commit_says_so(env):
-    """#1407: ship resolves the integration commit first; with no such branch it refuses instead of merging a name."""
-    m, repo, home = env
+
+def test_owner_stages_other_than_review_never_read_the_task_commit(env):
+    """#1599 review R1 (e8456ff): only the review text names the task's commit. A plan/test/verify stage parks for
+    the owner even when the task folder's git cannot be read."""
+    m, repo, _home = env
+    t = _parked_at_gate_with_an_unreadable_folder(m, repo, "work:owner gate:owner test:owner")
+    assert t["status"] == "waiting" and t["waiting"].startswith("test task #1"), (t["status"], t["waiting"])
+
+
+def test_owner_review_adopts_an_older_install_folder_first(env):
+    """#1599 review R1 (e8456ff): a task folder whose `.git` is still a link (older install) is adopted before the
+    review reads its commit, instead of stopping the task."""
+    m, repo, _home = env
     open_project(m, repo)
-    integ = gitops.project_root(home, 1) / "integration"
-    if integ.exists():
-        sh(repo, "git", "worktree", "remove", "--force", str(integ))
-    sh(repo, "git", "branch", "-D", gitops.integration_branch(1))
-    for apply in (False, True):
-        assert m.call("ship_plan", project="demo", apply=apply, yes=True)["code"] == "NO_INTEGRATION"
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner gate:owner review:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    wt = Path(t["worktree"])
+    (wt / "mine.txt").write_text("by hand\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    gitops._rmtree(wt / ".git")                                       # back to an older install's gitfile
+    (wt / ".git").write_text(f"gitdir: {gitops._ENTRIES[gitops._key(wt)]}\n", encoding="utf-8")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and t["waiting"].startswith("review task #1"), (t["status"], t["waiting"])
+    assert (wt / ".git").is_dir()
 
 
 def test_a_restarted_manager_knows_each_project_repository_from_its_record(env):

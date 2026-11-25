@@ -501,14 +501,36 @@ def test_a_git_folder_whose_real_path_is_elsewhere_is_refused(tmp_path, monkeypa
 
 
 def test_an_owner_repository_that_looks_like_a_task_folder_is_not_refused(tmp_path):
-    """#1599 review R5: only <home>/projects/<pid>/wt/t<n>-a<n> (or a registered project's wt) is a task folder; an
-    owner repository at e.g. ~/projects/x/wt/t1-a1 is plain git, not "belongs to no registered project"."""
-    own = tmp_path / "projects" / "x" / "wt" / "t1-a1"
-    own.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(own)], check=True)
-    assert gitops.git(own, "status", "--porcelain").returncode == 0
-    jarves = tmp_path / "home" / "projects" / "7" / "wt" / "t1-a1"     # JARVES's own layout, never registered
+    """#1599 review R5, R3 (e8456ff): only <JARVES home>/projects/<pid>/wt/t<n>-a<n> (or a registered project's wt) is a
+    task folder; an owner repository at e.g. ~/projects/x/wt/t1-a1 or ~/projects/2024/wt/t1-a1 is plain git."""
+    for name in ("x", "2024"):
+        own = tmp_path / "projects" / name / "wt" / "t1-a1"
+        own.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(own)], check=True)
+        assert gitops.git(own, "status", "--porcelain").returncode == 0
+    gitops.register_home(tmp_path / "home")
+    jarves = tmp_path / "home" / "projects" / "7" / "wt" / "t1-a1"     # JARVES's own layout, project not registered
     jarves.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(jarves)], check=True)
     with pytest.raises(gitops.GitError, match="no registered project"):
         gitops.git(jarves, "status")
+
+
+def test_a_task_folder_without_a_git_gets_its_own_message(tmp_path):
+    """#1599 review R4 (e8456ff): a missing `.git` is refused (fail closed) with its own message, not "links to a
+    shared repository"."""
+    _repo, _home, wt = _task(tmp_path)
+    gitops._rmtree(wt / ".git")
+    with pytest.raises(gitops.GitError, match="has no .git"):
+        gitops.commit_all(wt, "jarves")
+
+
+def test_the_private_git_is_a_shallow_copy_of_the_task_commit(tmp_path):
+    """#1599 review R2 (e8456ff): each attempt copies only the task branch's latest commit, not its whole history."""
+    repo, home = _repo(tmp_path), tmp_path / "jhome"
+    gitops.git(repo, "commit", "-q", "--allow-empty", "-m", "second", "--no-verify")
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, br = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    assert gitops.git(repo, "rev-list", "--count", br).stdout.strip() == "2"
+    own = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=wt, capture_output=True, text=True, check=True)
+    assert own.stdout.strip() == "1" and (wt / ".git" / "shallow").exists()

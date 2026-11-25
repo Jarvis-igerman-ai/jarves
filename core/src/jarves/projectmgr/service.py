@@ -61,6 +61,7 @@ class Manager(StageEngine):
         self.cfg = getattr(cfg, "projects", None) or ProjectsConfig()
         self.clock = clock
         self.db = ProjectDB(self.home / "projects.db", clock)
+        gitops.register_home(self.home)
         for p in self.db.projects(include_archived=True):  # #1599: task folders' owner repository, from the record
             gitops.register_project(self.home, p["id"], p["path"])
         self._ask = ask

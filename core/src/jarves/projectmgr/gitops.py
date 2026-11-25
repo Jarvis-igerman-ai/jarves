@@ -97,6 +97,7 @@ _TASK_NAME = re.compile(r"t\d+-a\d+")
 
 _PROJECTS: dict[str, str] = {}     # project root -> owner repository, recorded by JARVES (never read from a folder)
 _ENTRIES: dict[str, str] = {}      # task folder -> its entry in the owner repository (cache of _entry)
+_HOMES: set[str] = set()           # <home>/projects of each JARVES home this process uses (#1599 review R3)
 
 
 def _key(path: str | Path) -> str:
@@ -106,7 +107,13 @@ def _key(path: str | Path) -> str:
 def register_project(home: Path, pid: int, repo: str) -> None:
     """Record which owner repository a project's task folders belong to (#1599). Called with the repository path
     from JARVES's own project record; nothing in a project folder can change it."""
+    register_home(home)
     _PROJECTS[_key(project_root(home, pid))] = str(repo)
+
+
+def register_home(home: Path) -> None:
+    """Record a JARVES home: only `<home>/projects/<digits>/wt/t<n>-a<n>` under it counts as a task folder."""
+    _HOMES.add(_key(Path(home) / "projects"))
 
 
 def _entry(repo: str, wt: Path) -> str:
@@ -140,10 +147,12 @@ def _task_env(cwd: str | Path) -> dict[str, str]:
     install's `git worktree`, or a replaced `.git`) until adopt_task_folder ran, and a folder of an unknown project."""
     wt = Path(cwd)
     root = wt.parent.parent                       # project_root(home, pid) = <home>/projects/<pid> (review R5)
-    layout = root.name.isdigit() and root.parent.name == "projects"   # unregistered JARVES folders fail closed
+    layout = root.name.isdigit() and _key(root.parent) in _HOMES   # unregistered projects of a JARVES home fail closed
     if not (_TASK_NAME.fullmatch(wt.name) and wt.parent.name == "wt" and wt.exists()
             and (layout or _key(root) in _PROJECTS)):
         return {}
+    if not os.path.lexists(wt / ".git"):
+        raise GitError(f"task folder {wt.name} has no .git; JARVES will not run git there (start the stage again)")
     if not _private_git(wt):
         raise GitError(f"task folder {wt.name}: its .git links to a shared repository (an older install or a "
                        "replaced .git); JARVES will not run git there (start the stage again)")
@@ -329,8 +338,9 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
 
 
 def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
-    """#1599: the folder's `.git` link to the owner's repository is replaced by a private `.git`: a clone of the task
-    branch with no remote and no hard links into the owner's objects, for the agent's own git. JARVES keeps using the
+    """#1599: the folder's `.git` link to the owner's repository is replaced by a private `.git`: a shallow clone of
+    the task branch's latest commit (review R2: no full history copy per attempt) with no remote and no hard links
+    into the owner's objects, for the agent's own git. JARVES keeps using the
     owner's worktree entry (_task_env), so the copy does not follow JARVES's commits and merges (informational for
     the agent). An older install's folder is adopted the same way; a config its agent already wrote into the owner's
     repository stays there (JARVES cannot tell it from the owner's own)."""
@@ -344,8 +354,8 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
     with _repo_lock(repo):
         _rmtree(tmp)
         try:
-            git(repo, "clone", "-q", "--no-checkout", "--no-hardlinks", "--no-tags", "--single-branch", "-b", branch,
-                str(repo), str(tmp), timeout=900)          # a full copy of the branch's history: large repos
+            git(repo, "clone", "-q", "--no-checkout", "--depth", "1", "--no-tags", "--single-branch", "-b", branch,
+                Path(repo).resolve().as_uri(), str(tmp), timeout=900)   # file://: a real copy, never hard links
             git(tmp, "remote", "remove", "origin")
             git(tmp, "reset", "-q")                          # the copy's index = its HEAD; the folder's files stay
             moved = os.path.lexists(dotgit)

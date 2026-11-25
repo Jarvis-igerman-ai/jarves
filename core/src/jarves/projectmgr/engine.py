@@ -719,14 +719,19 @@ class StageEngine:
                             "git inside that folder is a private copy and does not reach the branch)")
         where = t["worktree"] or str(self._integration(p))
         at = self._integration_sha(p)[:12] or base                  # the commit, not the movable name (#1469)
-        # the task's commit, read in the owner's repository: a task folder's own `.git` is a private copy (#1599)
-        # no fallback to a bare "HEAD": with -C <owner repo> it names the owner's commit, not the task's (#1599 R2)
-        try:
-            rev = gitops.git(where, "rev-parse", "HEAD").stdout.strip()[:12]
-        except gitops.GitError as e:
-            return ("stop", "failed", f"git failed: {clean(e, 200)}")
-        if not rev:
-            return ("stop", "failed", "git failed: no commit for the task")
+        rev = ""
+        if kind == "review":            # only the review text names the task's commit (#1599 review R1 of e8456ff)
+            # read in the owner's repository: a task folder's own `.git` is a private copy (#1599); an older
+            # install's folder is adopted first. No fallback to a bare "HEAD": with -C <owner repo> it names the
+            # owner's commit, not the task's.
+            try:
+                if t["worktree"] and Path(t["worktree"]).exists():
+                    gitops.adopt_task_folder(p["path"], Path(t["worktree"]), t["branch"])
+                rev = gitops.git(where, "rev-parse", "HEAD").stdout.strip()[:12]
+            except (gitops.GitError, OSError) as e:
+                return ("stop", "failed", f"git failed: {clean(e, 200)}")
+            if not rev:
+                return ("stop", "failed", "git failed: no commit for the task")
         text = {
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
             "test": f"test task #{t['seq']} yourself (code in {where}), then say pass or fail",
