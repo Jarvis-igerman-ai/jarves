@@ -15,6 +15,8 @@ import threading
 import time
 from pathlib import Path
 
+from .. import logs
+
 _log = logging.getLogger(__name__)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
@@ -95,6 +97,8 @@ _GIT_OK: list[bool] = []                    # the version check passed once in t
 _TASK_NAME = re.compile(r"t\d+-a\d+")
 
 
+# _PROJECTS/_ENTRIES/_HOMES are written from task threads; every read-modify-write holds _REG_LOCK (#1785 R5)
+_REG_LOCK = threading.Lock()
 _PROJECTS: dict[str, str] = {}     # project root -> owner repository, recorded by JARVES (never read from a folder)
 _ENTRIES: dict[str, str] = {}      # task folder -> its entry in the owner repository (cache of _entry)
 _HOMES: set[str] = set()           # <home>/projects of each JARVES home this process uses (#1599 review R3)
@@ -108,12 +112,14 @@ def register_project(home: Path, pid: int, repo: str) -> None:
     """Record which owner repository a project's task folders belong to (#1599). Called with the repository path
     from JARVES's own project record; nothing in a project folder can change it."""
     register_home(home)
-    _PROJECTS[_key(project_root(home, pid))] = str(repo)
+    with _REG_LOCK:
+        _PROJECTS[_key(project_root(home, pid))] = str(repo)
 
 
 def register_home(home: Path) -> None:
     """Record a JARVES home: only `<home>/projects/<digits>/wt/t<n>-a<n>` under it counts as a task folder."""
-    _HOMES.add(_key(Path(home) / "projects"))
+    with _REG_LOCK:
+        _HOMES.add(_key(Path(home) / "projects"))
 
 
 def _entry(repo: str, wt: Path) -> str:
@@ -157,12 +163,15 @@ def _task_env(cwd: str | Path) -> dict[str, str]:
         raise GitError(f"task folder {wt.name}: its .git links to a shared repository (an older install or a "
                        "replaced .git); JARVES will not run git there (start the stage again)")
     k = _key(wt)
-    if k not in _ENTRIES:
-        repo = _PROJECTS.get(_key(wt.parent.parent))
+    with _REG_LOCK:
+        entry, repo = _ENTRIES.get(k), _PROJECTS.get(_key(wt.parent.parent))
+    if not entry:
         if not repo:
             raise GitError(f"task folder {wt.name} belongs to no registered project")
-        _ENTRIES[k] = _entry(repo, wt)
-    return {"GIT_DIR": _ENTRIES[k], "GIT_WORK_TREE": str(wt.resolve())}
+        entry = _entry(repo, wt)                   # git runs outside the lock; the same answer for every thread
+        with _REG_LOCK:
+            _ENTRIES[k] = entry
+    return {"GIT_DIR": entry, "GIT_WORK_TREE": str(wt.resolve())}
 
 
 def _run(cwd: str | Path, *argv: str) -> subprocess.CompletedProcess:
@@ -345,11 +354,17 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
     the agent). An older install's folder is adopted the same way; a config its agent already wrote into the owner's
     repository stays there (JARVES cannot tell it from the owner's own)."""
     wt = Path(wt)
-    _PROJECTS[_key(wt.parent.parent)] = str(repo)
+    with _REG_LOCK:
+        _PROJECTS[_key(wt.parent.parent)] = str(repo)
     dotgit = wt / ".git"
     if _private_git(wt):
         return                                               # already private
-    _ENTRIES[_key(wt)] = _entry(repo, wt)                   # from the owner's side, before the link goes
+    entry = _entry(repo, wt)                                 # from the owner's side, before the link goes
+    with _REG_LOCK:
+        _ENTRIES[_key(wt)] = entry
+    if not _gitfile_names(dotgit, entry):                    # not an older install's link: make the repair visible
+        logs.warn("projects", "TASK_GIT_REPLACED", "a task folder's .git was not its own; JARVES replaced it",
+                  path=wt.name, kind=_git_kind(dotgit))
     tmp = wt.with_name(f".{wt.name}.clone")
     with _repo_lock(repo):
         _rmtree(tmp)
@@ -369,6 +384,25 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
                 raise GitError(f"task folder {wt.name}: could not give it its own .git: {e}"[:300]) from e
         finally:
             _rmtree(tmp)
+
+
+def _gitfile_names(dotgit: Path, entry: str) -> bool:
+    """True for an older install's `.git`: a plain file `gitdir: <entry>` naming this folder's own entry."""
+    if dotgit.is_symlink() or os.path.isjunction(dotgit) or not dotgit.is_file():
+        return False
+    try:
+        text = dotgit.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return False
+    return text.startswith("gitdir:") and _key(text[7:].strip()) == _key(entry)
+
+
+def _git_kind(dotgit: Path) -> str:
+    if not os.path.lexists(dotgit):
+        return "missing"
+    if dotgit.is_symlink() or os.path.isjunction(dotgit):
+        return "link"
+    return "folder" if dotgit.is_dir() else "gitfile-elsewhere"
 
 
 def _rmtree(path: Path) -> None:
@@ -404,7 +438,8 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     with _repo_lock(repo):
         git(repo, "worktree", "remove", "--force", str(wt), check=False)   # refused for an adopted folder: rmtree
         _rmtree(Path(wt))
-        _ENTRIES.pop(_key(wt), None)
+        with _REG_LOCK:
+            _ENTRIES.pop(_key(wt), None)
         git(repo, "worktree", "prune", check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)

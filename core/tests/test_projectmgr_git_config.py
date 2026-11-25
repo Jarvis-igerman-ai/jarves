@@ -421,6 +421,21 @@ def test_a_folder_git_replaced_by_a_link_to_the_owner_repository_is_refused(tmp_
         gitops.commit_all(wt, "jarves")
 
 
+def test_adoption_logs_a_git_that_is_not_an_older_install_link(tmp_path, monkeypatch):
+    """#1785 R1: adoption no longer repairs a replaced `.git` quietly. A gitfile naming another entry (or a link or
+    a folder) logs TASK_GIT_REPLACED; an older install's gitfile naming its own entry does not."""
+    repo, _home, wt = _task(tmp_path)
+    seen = []
+    monkeypatch.setattr(gitops.logs, "warn", lambda comp, code, msg, **f: seen.append((code, f["kind"])))
+    entry, br = gitops._ENTRIES[gitops._key(wt)], gitops.task_branch(1, 1, 1)
+    for text, want in ((f"gitdir: {entry}\n", []), (f"gitdir: {tmp_path}\n", [("TASK_GIT_REPLACED", "gitfile-elsewhere")])):
+        seen.clear()
+        gitops._rmtree(wt / ".git")
+        (wt / ".git").write_text(text, encoding="utf-8")
+        gitops.adopt_task_folder(str(repo), wt, br)
+        assert seen == want and (wt / ".git").is_dir()
+
+
 def test_a_pointer_planted_next_to_the_folder_never_redirects_jarves_git(tmp_path):
     """#1599 review R1: JARVES finds a task folder's entry from the owner repository it recorded, never from a file
     in or next to the folder. A file planted next to the folder that names the agent's own repository (here

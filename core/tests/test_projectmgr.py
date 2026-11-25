@@ -1483,6 +1483,7 @@ def test_owner_review_adopts_an_older_install_folder_first(env):
     assert t["status"] == "waiting" and t["waiting"].startswith("review task #1"), (t["status"], t["waiting"])
     assert (wt / ".git").is_dir()
 
+
 def test_ship_without_an_integration_commit_says_so(env):
     """#1407: ship resolves the integration commit first; with no such branch it refuses instead of merging a name."""
     m, repo, home = env
@@ -1511,5 +1512,30 @@ def test_a_restarted_manager_knows_each_project_repository_from_its_record(env):
 def test_the_agent_card_warns_that_the_folder_git_is_a_private_copy():
     """#1599 review R4: the folder's git does not follow JARVES's commits, so stash/checkout/reset there would undo
     committed work; the card says so."""
-    card = cards.build_card({"name": "p"}, {"seq": 1, "title": "t", "spec": "s"}, [], cap=3000, integration="abc")
-    assert "private copy" in card and "git stash" in card
+    for integ in ("abc", ""):                        # #1785 R4: every task folder is private, not only later ones
+        card = cards.build_card({"name": "p"}, {"seq": 1, "title": "t", "spec": "s"}, [], cap=3000, integration=integ)
+        assert "private copy" in card and "git stash" in card, integ
+
+
+def test_an_agent_stage_on_a_folder_without_its_owner_entry_fails_cleanly(env):
+    """#1785 R2: adoption of an existing folder whose owner-side worktree entry is gone raises GitError; the agent
+    stage ends the task `failed` with the git message, not TASK_CRASHED or a stuck task."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner gate:owner work:claude")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    wt = Path(t["worktree"])
+    (wt / "mine.txt").write_text("by hand\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    shutil.rmtree(gitops._ENTRIES.pop(gitops._key(wt)))
+    gitops._rmtree(wt / ".git")                                       # not private any more: adoption must run
+    (wt / ".git").write_text("gitdir: /nowhere\n", encoding="utf-8")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "failed", (t["status"], t["waiting"])
+    assert "no worktree entry" in json.dumps(m.db.events(t["id"], 40)), m.db.events(t["id"], 40)
