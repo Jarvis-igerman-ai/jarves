@@ -280,9 +280,9 @@ def test_signing_programs_from_the_shared_config_fall_back_to_the_owners(tmp_pat
                                 "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultKeyCommand": ""}
 
 
-@pytest.mark.skipif(os.name == "nt", reason="an executable shell script as gpg.program")
 def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path):
-    """#1407: the real run behind the override above, on the ship path (`merge_in(..., ident=False)`)."""
+    """#1407: the real run behind the override above, on the ship path (`merge_in(..., ident=False)`). A `#!/bin/sh`
+    script: Git for Windows runs it through its own sh too. The control run proves the script does run without JARVES."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
     prog = tmp_path / "evil-gpg"
     prog.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\nexit 1\n", encoding="utf-8")
@@ -295,8 +295,11 @@ def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path):
     (repo / "m.txt").write_text("m\n", encoding="utf-8")
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "main", "--no-verify")
-    _cfg(repo, "gpg.program", str(prog))
+    _cfg(repo, "gpg.program", prog.as_posix())
     _cfg(repo, "commit.gpgsign", "true")
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "control", "--no-verify"], cwd=repo, capture_output=True)
+    assert marker.exists()                                     # control: plain git runs the agent's program
+    marker.unlink()
     gitops.merge_in(repo, "side", ident=False)                  # no gpg on PATH may fail the merge; never the agent's
     assert not marker.exists()
 
