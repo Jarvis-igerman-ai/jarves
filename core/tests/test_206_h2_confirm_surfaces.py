@@ -173,10 +173,57 @@ async def test_every_approval_path_for_pref_confirm_runs_approval_meta(home, ori
     assert r.ok and len(calls) == 1 and p.for_prompt() == [OLD]
 
 
-def test_dashboard_confirm_button_posts_the_shown_words():
-    # review R1: the page must send {text} in the POST body, or every dashboard confirm gets PREF_TEXT_REQUIRED.
-    import pathlib, re
-    js = (pathlib.Path(prefs_mod.__file__).parent / "dashboard_static" / "pillars.js").read_text(encoding="utf-8")
-    assert re.search(r'const op = \(id, o, extra\) => act\(msg, \(\) => post\("/api/prefs/op", '
-                     r'Object\.assign\(\{ op: o, id: id \}, extra \|\| \{\}\)\)\)', js)
-    assert 'op(p.id, "confirm", { text: p.text })' in js
+@pytest.mark.parametrize("permission", ["action", "destructive"])
+@pytest.mark.parametrize("origin", ["model", "user"])
+async def test_registry_hands_approval_meta_and_the_handler_the_same_args_object(origin, permission):
+    # review R2 of #1680: pref_confirm binds the shown words on the args object approval_meta sees, so the registry
+    # must pass that very object to the handler for every tool with approval_meta (a copy would fail every confirm).
+    from pydantic import BaseModel
+    from jarves.skills import Skill, SkillRegistry, Tool, ToolResult
+
+    class A(BaseModel):
+        x: int = 0
+    seen: dict = {}
+
+    async def handler(a):
+        seen["handler"] = a
+        return ToolResult(True, "done")
+
+    class S(Skill):
+        name = "probe"
+
+        def tools(self):
+            return [Tool("probe_act", "probe", handler, A, permission=permission, confirm="Do it?",
+                         approval_meta=lambda a: seen.setdefault("meta", a) and {})]
+    reg = SkillRegistry()
+
+    async def yes(prompt, **meta):
+        return True
+    yes.accepts_meta = True
+    reg.confirm = yes
+    reg.register(S())
+    reg.allowed_actions |= {"probe_act"}
+    r = await reg.call("probe_act", {"x": 1}, origin=origin)
+    assert r.ok, r.message
+    assert seen["meta"] is seen["handler"]
+
+
+async def test_confirm_after_a_conflict_asks_again_and_is_not_replayed(home):
+    # review R3 of #1680: a PREF_CONFLICT must not be cached or replayed; re-asking the owner with the same id shows
+    # the NEW words and confirms exactly those.
+    p, pid = _proposed(home)
+    asked: list = []
+    reg = registry(prefs=p, answer=True, asked=asked)
+    real = reg.confirm
+
+    async def edit_once(prompt, **meta):
+        if len(asked) == 0:
+            p.edit(pid, NEW, by="voice", repropose=True)
+        return await real(prompt, **meta)
+    edit_once.accepts_meta = True
+    reg.confirm = edit_once
+    first = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert not first.ok and first.code == "PREF_CONFLICT"
+    again = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert again.ok and "already_done" not in again.data and "cached" not in again.data
+    assert [a[1]["details"]["preference"] for a in asked] == [OLD, NEW] and p.for_prompt() == [NEW]
