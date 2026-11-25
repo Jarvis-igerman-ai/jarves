@@ -102,6 +102,18 @@ _PUSH_URL = re.compile(r"^(?:https://(?i:github\.com)/|ssh://git@(?i:github\.com
                        r"|git@(?i:github\.com):)[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*?(?:\.git)?/?\Z")
 
 
+def _push_slug(url: str) -> str:
+    """owner/repo (lower case, as GitHub compares them) of a URL that already matched _PUSH_URL."""
+    return "/".join(re.split(r"[/:]", re.sub(r"(?:\.git)?/?\Z", "", url))[-2:]).lower()
+
+
+def pin_slug(path: str) -> str:
+    """#1595: the owner/repo `configure --github` pins: origin must be a URL push_branch accepts, parsed with the same
+    _push_slug that push_branch checks against (review R2: one parser), else ''."""
+    url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
+    return _push_slug(url) if _PUSH_URL.match(url) else ""
+
+
 def _check_push_target(url: str, got: list[str]) -> None:
     """#1748: the URL(s) git will really push to after the owner's global config (insteadOf, pushInsteadOf, an
     agent-writable ~/.gitconfig) must be exactly one github.com URL of the same repository as the checked origin."""
@@ -122,8 +134,10 @@ def _no_userinfo(u: str) -> str:
     return re.sub(r"^[^/]*@", "***@", re.sub(r"(?<=//)[^/]*@", "***@", u))   # round 3 R2: also "u:tok@host:o/r"
 
 
-def push_branch(path: str, branch: str) -> None:
+def push_branch(path: str, branch: str, repo: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch).
+    #1595: `repo` is the owner/repo the owner pinned (`jarvis project config --github`, stored as github_repo), never
+    read from the agent-writable config at push time; an origin naming any other repository is refused.
     #1722: the project's own config is agent-writable (remote.<x>.receivepack/pushurl, url.*.insteadOf, ext::,
     core.sshCommand, credential helpers, gpg...). So git push runs in a fresh JARVES-made bare repository that borrows
     the project's objects (alternates): only the owner's system/global config applies, and nothing the project config
@@ -135,6 +149,9 @@ def push_branch(path: str, branch: str) -> None:
     url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
     if not _PUSH_URL.match(url):
         raise ForgeError(f"JARVES pushes only to a github.com origin: {PUSH_URL_FORMS}")
+    if not repo or _push_slug(url) != repo.lower():
+        raise ForgeError(f"origin is not the pinned repository {repo or '(none pinned)'}: run jarvis project config "
+                         "--github write again if you moved it")
     if gitops.git(path, "rev-parse", "--is-shallow-repository").stdout.strip() == "true":   # alternates lack it
         raise ForgeError("JARVES cannot push from a shallow clone: run git fetch --unshallow in the project first")
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
