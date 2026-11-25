@@ -147,10 +147,10 @@
     const choose = async (v, approve) => {
       try {
         await api("/api/identity/voice", { method: "POST", body: JSON.stringify({ voice: v.id, approve_cost: approve === true }) });
-        vMsg.textContent = `Voice set to ${v.voice}: heard from the next conversation.`; route(true);
+        vMsg.textContent = tx(`הקול שונה ל-${v.voice}: יישמע מהשיחה הבאה.`, `Voice set to ${v.voice}: heard from the next conversation.`); route(true);
       } catch (e) {
-        if (!approve && /approv|switching/i.test(e.message) && confirm(`${e.message}\n\nApprove this change?`)) return choose(v, true);
-        vMsg.textContent = "Not changed: " + e.message;
+        if (!approve && /approv|switching/i.test(e.en || e.message) && confirm(`${e.message}\n\n${tx("לאשר את השינוי?", "Approve this change?")}`)) return choose(v, true);
+        vMsg.textContent = tx("לא שונה: ", "Not changed: ") + e.message;
       }
     };
     const voiceRows = d.voices.map((v) => el("tr", {},

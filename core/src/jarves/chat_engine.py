@@ -387,7 +387,7 @@ class WebChat:
         if not text:
             return 400, {"error": "text is empty", "code": "CHAT_EMPTY"}
         if len(text) > MAX_TEXT:
-            return 413, {"error": "message too long", "code": "CHAT_TOO_LONG"}
+            return 413, {"error": f"message too long: {MAX_TEXT} characters at most, split it into several messages", "code": "CHAT_TOO_LONG"}
         if mid is not None and not (isinstance(mid, str) and MSG_ID_RE.match(mid)):
             return 400, {"error": "message id must be 8-64 letters, digits or _ . : -", "code": "CHAT_BAD_ID"}
         if self.closed or getattr(self.core, "stopping", False):
@@ -760,7 +760,7 @@ def api_ui_action(ctx, m, body):
     phone or LAN device never reaches this (not on its allowlist) and is refused here again."""
     who = getattr(getattr(ctx, "_tl", None), "who", None) or {}
     if who.get("kind") != "local":
-        return 403, {"error": "only the computer itself can do this", "code": "UI_ACTION_FORBIDDEN"}
+        return 403, {"error": "only the computer itself can do this: do it in the dashboard on that computer", "code": "UI_ACTION_FORBIDDEN"}
     gated = _gate(ctx)
     if gated:
         return gated

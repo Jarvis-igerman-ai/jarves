@@ -27,7 +27,7 @@ function liveViewCard() {
       }
       clockEl.textContent = tx("פג בעוד {n} שנ׳", "Expires in {n} s").replace("{n}", r.expires_in_s);
     } catch (e) {
-      if (/busy/i.test(e.message || "")) { clockEl.textContent = tx("הדף עסוק, מנסה שוב", "The page is busy, trying again"); return; }   // keep the view
+      if (/busy/i.test(e.en || e.message || "")) { clockEl.textContent = tx("הדף עסוק, מנסה שוב", "The page is busy, trying again"); return; }   // keep the view
       img.style.display = "none"; end(e.message);
     } finally { inflight = false; }
   };

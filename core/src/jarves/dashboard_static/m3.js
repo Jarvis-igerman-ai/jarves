@@ -37,7 +37,7 @@
   const when = (ts) => ts ? `${day(ts)} ${clock(ts)}` : "—";
   const msgSpan = () => el("span", { class: "muted small", role: "status" });
   async function act(msg, fn) {
-    try { await fn(); route(true); } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }   // server errors via the catalog
+    try { await fn(); route(true); } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + e.message; }   // api() already translated it
   }
   // destructive: the SERVER asks on the approval popup and this request waits for the owner's answer
   const WAITING = () => tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");
