@@ -56,6 +56,7 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 385a | the new goal_plans texts ("it may already have happened", "the plan changed in the meantime", unknown-step phone refusal) are English only, like the existing goal_plans strings | goals | Hebrew users see English in the retry popup and errors; add to hebrew_parts and the dashboard locale part | review (Opus review of #812) |
 | 1059a | workflow console: the shared `.demo-notice` band keeps hard-coded dark colours (#221d13 / #dfba76) in the light theme | workflow console UI | Dark band on the light Health/Timeline/Today demo pages; out of JAR-194 scope (.hl-*/.tl-* only) | review #1059 |
 | 1099-a | preferences.looks_sensitive allows a bare 32+ hex string with no key word within two words (documented tradeoff so git SHAs pass) | prefs / security | A pasted hex key without a key word nearby can still be learned | review R5 of #1753 (predecessor of #1765) |
+| 1099-b | preferences.looks_sensitive: the Hebrew bare מפתח (key, also "developer") counts only with שלי/שלנו or ":"/"=" right after it, so "המפתח של הבית: hunter22" is allowed; the rules are heuristic regexes (accepted residuals 1099-a/b, council to confirm per review 10 R3) | prefs / security | A Hebrew "key of X: value" phrasing can still be learned | review 10 R2/R3 of #1765 |
 
 ## Kept as issues
 

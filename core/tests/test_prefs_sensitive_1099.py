@@ -47,6 +47,10 @@ KEYS = [
     # #1099 review 9 R1: a date or shortcut right after ":" does not hide the credential behind it
     "wifi key: 12/31 hunter22",
     "door key = 2026-12-01 Kx7mP2q9",
+    # #1099 review 10 R1: any number of dates or shortcuts after ":" does not hide the credential behind them
+    "wifi key: 12/31 10:30 hunter22",
+    "door key = 2026-12-01 ctrl+alt Kx7mP2q9",
+    "token: 2026-12-01, 12/31, 10:30 Kx7mP2q9",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -99,6 +103,10 @@ PLAIN = [
     "המפתח צריך לתקן: build_v2",
     "המפתחות של הצוות סיימו: release_v3",
     "key dates: 2026-12-01 and 2026-12-15",
+    # #1099 review 10 R2: a two-word "developers of X:" before ":" is not a key word ("של" alone is no marker)
+    "המפתחות של הצוות: release_v3",
+    "המפתח של הפרויקט: build_v2",
+    "key dates: 12/31 10:30 and 1/15",
     "fix api key loader: done",
     "client secret rotation: done",
     "fix key loader in commit 9fceb02d0ae598e95dc970b74767f19372d61af8",   # SHA more than two words after "key"
@@ -114,6 +122,13 @@ def test_key_and_token_shaped_text_is_sensitive(text):
 @pytest.mark.parametrize("text", PLAIN)
 def test_ordinary_preferences_are_not_sensitive(text):
     assert not prefs_mod.looks_sensitive(text)
+
+
+def test_many_dates_after_a_key_word_stay_fast():
+    """#1099 review 10 R1: skipping any number of dates must not backtrack exponentially. "12-01" parses two ways,
+    so without the atomic repeat these inputs would not finish (no clock: a regression hangs the run instead)."""
+    assert not prefs_mod.looks_sensitive("key: " + "12-01, " * 2000)
+    assert prefs_mod.looks_sensitive("key: " + "2026-12-01, " * 40 + "ctrl+alt hunter22")
 
 
 def test_non_string_input_does_not_crash():
