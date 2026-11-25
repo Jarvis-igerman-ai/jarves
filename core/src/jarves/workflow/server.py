@@ -77,7 +77,7 @@ def _tighten_once(path: Path) -> None:
 
     The path is marked before icacls runs, so a failure is not retried in the same process: it is logged
     by owner_only_file and retried on the next start (access.token and, since JAR-835, sessions.json)."""
-    key = str(path)
+    key = os.path.abspath(path)  # one key for a relative and an absolute spelling (no I/O, never raises)
     if key not in _TIGHTENED:
         _TIGHTENED.add(key)
         owner_only_file(path)
@@ -130,9 +130,9 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     now = time.time() if now is None else now
     path = Path(home) / "sessions.json"
     try:
-        text = path.read_text(encoding="utf-8")
-        _tighten_once(path)  # JAR-260: a file from before #824 keeps the folder ACL until tightened at startup
-        raw = json.loads(text)
+        if path.is_file():  # JAR-260: a file from before #824 keeps the folder ACL; Server.__init__ loads at startup
+            _tighten_once(path)  # before the read, so an unreadable file is tightened too
+        raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
             return {}

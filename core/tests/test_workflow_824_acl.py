@@ -91,3 +91,29 @@ def test_failed_tighten_is_not_retried_until_next_start(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_TIGHTENED", set())  # a new process
     server.load_sessions(tmp_path)
     assert seen == [tmp_path / "sessions.json"] * 2
+
+
+def test_unreadable_sessions_file_is_still_tightened(monkeypatch, tmp_path):
+    """Review R2 (JAR-835): a file that exists but cannot be read is tightened before the read fails."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
+
+    def locked(self, *a, **k):
+        raise PermissionError(13, "locked", str(self))
+    monkeypatch.setattr(Path, "read_text", locked)
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == [tmp_path / "sessions.json"]
+
+
+def test_relative_and_absolute_path_share_one_key(monkeypatch, tmp_path):
+    """Review R1 (JAR-835): the same file through two spellings is tightened once per process."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    server.load_sessions(Path("."))
+    server.load_sessions(tmp_path)
+    assert len(seen) == 1
