@@ -2,6 +2,8 @@
 own git calls. An agent can write `.git/config`, an included file and `.git/info/attributes` (no commit needed)."""
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -353,3 +355,162 @@ def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):
     r = gitops.git(repo, "rev-list", "--count", other)
     assert r.stdout.strip() == "2"                         # git may still print its graft-deprecation hint: fine
     assert "warning" not in r.stderr and "unable to access" not in r.stderr     # but no error opening the graft path
+
+
+def _task(tmp_path: Path):
+    repo, home = _repo(tmp_path), tmp_path / "home"
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    return repo, wt
+
+
+def test_a_filter_an_agent_adds_after_the_config_read_never_runs(tmp_path, monkeypatch):
+    """#1599: git() reads the config once, then git reads it again. An agent running `git config` in its folder
+    between the two reads must not reach the config JARVES's git loads: the folder's `.git` is its own copy."""
+    repo, wt = _task(tmp_path)
+    marker, real, calls = tmp_path / "ran.txt", gitops.shared_config_overrides, []
+
+    real_git = gitops.git
+
+    def racing(cwd):
+        env = real(cwd)
+        if calls and calls[-1][:1] == ("add",) and len(calls[-1]) > 1:      # the `add -A` (clean filter's) call
+            subprocess.run(["git", "config", "filter.late.clean", _sh(marker)], cwd=wt, check=True)   # the agent
+            calls[-1] = ("injected",)
+        return env
+
+    def tracing(cwd, *args, **kw):
+        calls.append(args)
+        return real_git(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "shared_config_overrides", racing)
+    monkeypatch.setattr(gitops, "git", tracing)
+    (wt / ".gitattributes").write_text("* filter=late\n", encoding="utf-8")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    assert ("injected",) in calls                                   # the race was really exercised
+    assert not marker.exists()
+    assert "late" not in (repo / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_the_owner_config_still_has_its_filters_blanked_in_a_task_folder(tmp_path):
+    """#1599 (review R1 of #1785): JARVES's git on a task folder loads the owner-side config, so the names there
+    are the ones blanked."""
+    repo, wt = _task(tmp_path)
+    marker = tmp_path / "ran.txt"
+    _cfg(repo, "filter.x.clean", _sh(marker))
+    (wt / ".gitattributes").write_text("* filter=x\n", encoding="utf-8")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    assert not marker.exists()
+
+
+def test_the_task_folder_git_works_for_the_agent_and_stays_private(tmp_path):
+    """#1599: the agent sees its branch, tip and a clean status; its own commits stay in its copy."""
+    repo, wt = _task(tmp_path)
+    plain = {"cwd": wt, "capture_output": True, "text": True, "check": True}
+    assert (wt / ".git").is_dir()
+    tip = gitops.git(repo, "rev-parse", gitops.task_branch(1, 1, 1)).stdout.strip()
+    assert subprocess.run(["git", "rev-parse", "HEAD"], **plain).stdout.strip() == tip
+    assert subprocess.run(["git", "status", "--porcelain"], **plain).stdout == ""
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], **plain)
+    subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "agent"], **plain)
+    assert gitops.git(repo, "rev-parse", gitops.task_branch(1, 1, 1)).stdout.strip() == tip
+    assert gitops.commit_all(wt, "jarves")                      # JARVES commits the folder's content itself
+    assert "a.py" in gitops.changed_files(wt, gitops.integration_branch(1))
+
+
+def test_a_task_folder_is_adopted_again_after_a_restart_or_fails_closed(tmp_path):
+    """#1599: after a restart (an empty registry) or on an older install's folder (`.git` still a gitfile into the
+    owner's repository) JARVES adopts the folder through the integration worktree; without one it refuses."""
+    repo, wt = _task(tmp_path)
+    saved = dict(gitops._TASK_GIT)
+    try:
+        gitops._TASK_GIT.clear()
+        shutil.rmtree(wt / ".git")
+        entry = next((repo / ".git" / "worktrees").glob("t1-a1*"))
+        (wt / ".git").write_text(f"gitdir: {entry}\n", encoding="utf-8")             # as an older install left it
+        assert gitops.git(wt, "status", "--porcelain").stdout == ""
+        assert (wt / ".git").is_dir()                                             # now a private copy
+        gitops._TASK_GIT.clear()
+        (wt.parent.parent / "integration").rename(wt.parent.parent / "gone")
+        with pytest.raises(gitops.GitError, match="not adopted"):
+            gitops.git(wt, "status")
+    finally:
+        gitops._TASK_GIT.clear()
+        gitops._TASK_GIT.update(saved)
+
+
+def test_a_linked_task_folder_git_is_replaced_never_written_through(tmp_path, monkeypatch):
+    """#1599 review R1: `.git` swapped for a link into the owner's `.git` (a Windows junction is not a symlink to
+    `is_symlink`; simulated here) is removed as a link; JARVES never rmtree-s or re-inits through it."""
+    repo, wt = _task(tmp_path)
+    owner = repo / ".git"
+    before = {n: (owner / n).read_bytes() for n in ("HEAD", "index")}
+    shutil.rmtree(wt / ".git")
+    _link_or_skip(wt / ".git", owner)
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False if self.name == ".git" else os.path.islink(self))
+    monkeypatch.setattr(Path, "is_junction", lambda self: self.name == ".git" and os.path.islink(self), raising=False)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    assert (wt / ".git").is_dir() and not os.path.islink(wt / ".git")
+    assert {n: (owner / n).read_bytes() for n in ("HEAD", "index")} == before
+    assert not (owner / "objects" / "info" / "alternates").exists()
+
+
+def test_the_rmtree_handler_never_ignores_a_link_it_cannot_remove(tmp_path):
+    """#1599 review R1: rmtree reports a top-level link or junction as an error from `islink`; that is re-raised."""
+    with pytest.raises(OSError, match="junction"):
+        gitops._writable(os.path.islink, str(tmp_path), OSError("junction"))
+
+
+def test_removing_an_adopted_task_folder_removes_its_entry_and_branch(tmp_path):
+    """#1599 review R2: `.git` is a folder now (not a gitfile); cleanup still removes folder, entry and branch."""
+    repo, wt = _task(tmp_path)
+    br = gitops.task_branch(1, 1, 1)
+    gitops.remove_worktree(str(repo), wt, br)
+    assert not wt.exists()
+    assert not list((repo / ".git" / "worktrees").glob("t1-a1*"))
+    assert gitops.git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode != 0
+    wt2, _ = gitops.new_task_worktree(tmp_path / "home", str(repo), 1, 1, 1)      # a retry onto the same path
+    assert wt2 == wt and (wt / ".git").is_dir() and gitops.git(wt, "status", "--porcelain").stdout == ""
+
+
+def _link_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as e:                         # Windows without Developer Mode or the symlink privilege
+        pytest.skip(f"cannot create a symlink here: {e}")
+
+
+def test_a_link_recreated_during_the_rebuild_is_never_written_through(tmp_path, monkeypatch):
+    """#1599 review R1 (cd3d528): an agent process still running may recreate `.git` as a link after any check.
+    The copy is built in a fresh folder JARVES makes and renamed onto `.git` last; a rename never follows a link."""
+    repo, wt = _task(tmp_path)
+    owner, real_git, real_rename = repo / ".git", gitops.git, os.rename
+    before = {n: (owner / n).read_bytes() for n in ("HEAD", "index")}
+
+    def swap():
+        if os.path.islink(wt / ".git"):
+            return
+        if (wt / ".git").is_dir():
+            shutil.rmtree(wt / ".git")
+        _link_or_skip(wt / ".git", owner)
+
+    def git_swapping(cwd, *args, **kw):
+        if args[:1] == ("init",):
+            swap()                                                # after the old check, before the writes
+        return real_git(cwd, *args, **kw)
+
+    def rename_swapping(src, dst):
+        if Path(dst) == wt / ".git":
+            swap()                                                # the last moment before the rename
+        return real_rename(src, dst)
+    monkeypatch.setattr(gitops, "git", git_swapping)
+    monkeypatch.setattr(gitops.os, "rename", rename_swapping)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    with pytest.raises((gitops.GitError, OSError)):
+        gitops.commit_all(wt, "a")
+    assert {n: (owner / n).read_bytes() for n in ("HEAD", "index")} == before
+    assert not (owner / "objects" / "info" / "alternates").exists()
+    assert not list(wt.parent.glob(".jarves-git-*"))              # the build folder is cleaned up
