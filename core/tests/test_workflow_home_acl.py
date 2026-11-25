@@ -65,6 +65,7 @@ def test_access_token_and_sessions_are_owner_only_after_creation(tmp_path, monke
 def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monkeypatch):
     """JAR-824: a pre-fix sessions.json with the inherited folder ACL is tightened when the server loads it."""
     monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
     home = tmp_path / "workflow"
     home.mkdir()
     old = home / "sessions.json"
