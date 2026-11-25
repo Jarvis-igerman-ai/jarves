@@ -130,7 +130,8 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     now = time.time() if now is None else now
     path = Path(home) / "sessions.json"
     try:
-        if path.is_file():  # JAR-260: a file from before #824 keeps the folder ACL; Server.__init__ loads at startup
+        # JAR-260: a file from before #824 keeps the folder ACL. The only caller is Server.__init__ (self.restored).
+        if path.is_file():
             _tighten_once(path)  # before the read, so an unreadable file is tightened too
         raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None

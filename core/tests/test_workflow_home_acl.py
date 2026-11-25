@@ -74,7 +74,7 @@ def test_access_token_and_sessions_are_owner_only_after_creation(tmp_path, monke
 
 
 @pytest.mark.windows_only
-def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monkeypatch):
+def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monkeypatch, request):
     """JAR-260 reopened: a sessions.json written before the fix (inherited ACL) is tightened on load."""
     monkeypatch.setattr(server, "_TIGHTENED", set())
     home = tmp_path / "workflow"
@@ -83,6 +83,10 @@ def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monke
     # built-in Users group (SID S-1-5-32-545) down to the file, as an old home folder did before #824.
     subprocess.run(["icacls", str(home), "/grant", "*S-1-5-32-545:(OI)(CI)(RX)"],
                    capture_output=True, text=True, timeout=60, check=True, **hidden_popen_kwargs())
+    # Drop the broader grant afterwards so no Users-readable folder stays in the pytest basetemp.
+    request.addfinalizer(lambda: subprocess.run(["icacls", str(home), "/reset", "/T", "/C", "/Q"],
+                                                capture_output=True, text=True, timeout=60, check=False,
+                                                **hidden_popen_kwargs()))
     old = home / "sessions.json"
     old.write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
     _, before = _acl(old)
