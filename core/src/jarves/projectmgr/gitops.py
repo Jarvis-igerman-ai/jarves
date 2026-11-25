@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -370,21 +371,112 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
     git(integration_wt, "merge", "--ff-only", branch)
 
 
+# (#1592) a check command and an agent run code from the worktree as the owner's user, and that code can write the
+# shared git dir, which the owner's own git reads (a planted filter or hook runs in the owner's checkout). No permission
+# rule stops executed code, so each run is guarded: these files are compared with a snapshot afterwards, a change is
+# restored and fails the run. Runs overlapping on one repository share the first run's snapshot, so a later run never
+# takes a planted file as its baseline. Not covered: a write during the run seen by git before the restore, other
+# files of the git dir (refs, objects), a second JARVES process. A config change the owner makes during a run is also
+# restored (and reported): the guard cannot tell who wrote it.
+_GUARD: dict[str, list] = {}               # common dir -> [runs inside, {relative path: snapshot}]
+_GUARD_LOCK = threading.Lock()
+
+
+def _guarded(common: Path) -> list[str]:
+    names = ["config", "config.worktree", "info/attributes"]
+    names += [f"worktrees/{d.name}/config.worktree" for d in sorted(common.glob("worktrees/*")) if d.is_dir()]
+    hooks = common / "hooks"
+    return names + ([f"hooks/{h.name}" for h in sorted(hooks.iterdir()) if not h.is_dir()] if hooks.is_dir() else [])
+
+
+def _snap(path: Path) -> tuple | None:
+    if path.is_symlink():
+        return ("link", os.readlink(path))
+    try:
+        return ("file", path.read_bytes(), path.stat().st_mode & 0o777)
+    except FileNotFoundError:
+        return None
+
+
+def _restore(path: Path, snap: tuple | None) -> None:
+    if snap is None or snap[0] == "link":   # a planted file goes; a link is never re-created by JARVES
+        if path.is_symlink() or path.exists():
+            path.unlink()
+        return
+    if not path.parent.is_dir():             # the worktree was removed meanwhile
+        return
+    tmp = path.with_name(f".{path.name}.jarves-{os.getpid()}-{threading.get_ident()}.tmp")
+    tmp.write_bytes(snap[1])
+    os.chmod(tmp, snap[2])
+    os.replace(tmp, path)
+
+
+@contextmanager
+def shared_git_guard(wt: str | Path, changed: list[str]):
+    """Restore the shared git dir's config, attributes and hooks after the block; `changed` gets what was restored.
+    A folder that is not a git repository has nothing to guard. A file that cannot be restored is listed as such."""
+    try:
+        p = _run(wt, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    except (OSError, subprocess.SubprocessError):   # a missing folder or a hung git: nothing found to guard; a
+                                                    # repository whose git hangs also fails JARVES's own git calls
+        p = None
+    common = Path(p.stdout.strip()) if p and p.returncode == 0 and p.stdout.strip() else None
+    key = os.path.normcase(os.path.realpath(str(common))) if common else ""
+    if common:
+        with _GUARD_LOCK:
+            g = _GUARD.setdefault(key, [0, {}])
+            g[0] += 1
+            for n in _guarded(common):     # a file new since the first run's snapshot is not in it: it was absent
+                g[1].setdefault(n, _snap(common / n) if g[0] == 1 else None)
+    try:
+        yield changed
+    finally:
+        if common:
+            with _GUARD_LOCK:
+                g = _GUARD[key]
+                try:
+                    for n in sorted(set(g[1]) | set(_guarded(common))):
+                        if _snap(common / n) != g[1].get(n):
+                            try:
+                                _restore(common / n, g[1].get(n))
+                                changed.append(n)
+                            except OSError as e:   # still fails the run; the owner must look
+                                changed.append(f"{n} (NOT restored: {e})")
+                finally:
+                    g[0] -= 1
+                    if not g[0]:
+                        del _GUARD[key]
+
+
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
     """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
-    env_keep: extra variable names the owner allowed for this command (a release may need a token)."""
+    env_keep: extra variable names the owner allowed for this command (a release may need a token). A check that
+    changed the shared git dir fails (#1592, the change is restored)."""
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
-    try:
-        p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
-                           env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        return False, "check timed out"
-    except OSError as e:
-        return False, f"check could not start: {e}"
+    changed: list[str] = []
+    with shared_git_guard(wt, changed):
+        try:
+            p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout,
+                               creationflags=_NOWIN, env=child_env(extra), encoding="utf-8", errors="replace",
+                               stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            p = None
+            res = (False, "check timed out")
+        except OSError as e:
+            p = None
+            res = (False, f"check could not start: {e}")
+    if changed:
+        return False, shared_git_message("the check", changed)
+    if p is None:
+        return res
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
+
+
+def shared_git_message(who: str, changed: list[str]) -> str:
+    return f"{who} changed the shared git dir (restored): {', '.join(changed)}"[:300]
 
 
 def repo_state(path: str) -> dict:

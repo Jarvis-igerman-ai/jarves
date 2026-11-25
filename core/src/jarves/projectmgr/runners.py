@@ -97,6 +97,17 @@ class Runner:
     def run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
             check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None,
             team: bool = False) -> Result:
+        """The agent runs code from the worktree (its check command, tests): a change it makes to the shared git dir
+        is restored and fails the run (#1592, gitops.shared_git_guard)."""
+        changed: list[str] = []
+        with gitops.shared_git_guard(cwd, changed):
+            r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
+                          timeout=timeout, on_start=on_start, cancel=cancel, team=team)
+        if changed:
+            r.ok, r.error = False, gitops.shared_git_message(self.name or "the agent", changed)
+        return r
+
+    def _run(self, prompt, cwd, *, model, resume, read_only, check_argv, timeout, on_start, cancel, team) -> Result:
         try:
             spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
                               team=team)
