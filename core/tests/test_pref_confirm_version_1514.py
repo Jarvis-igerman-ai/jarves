@@ -98,14 +98,86 @@ async def test_voice_popup_shows_the_stored_words_not_the_model_text(home):
     assert shown == ["prefers tea"] and p.get(pid)["state"] == "proposed"
 
 
-def test_dashboard_page_sends_the_shown_wording_and_has_hebrew_for_the_new_errors():
-    from pathlib import Path
+async def test_voice_confirm_of_other_words_is_refused_before_the_popup_even_if_an_edit_makes_them_true(home):
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest("prefers tea", "I prefer tea", "food", by="voice")["item"]["id"]     # stored A
+    shown: list = []
+    reg = SkillRegistry()
+
+    async def popup(prompt, **meta):            # would show A; an edit to the model's B commits before the yes lands
+        shown.append(meta["details"]["preference"])
+        p.edit(pid, "prefers coffee", by="phone", repropose=True)
+        return True
+    popup.accepts_meta = True
+    reg.confirm = popup
+    reg.register(prefs_mod.make_skill(p))
+    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
+    r = await reg.call("pref_confirm", {"id": pid, "text": "prefers coffee"}, origin="model")   # model text B
+    assert not r.ok and r.code == "PREF_CONFLICT" and shown == []                           # the owner is never asked
+    p.edit(pid, "prefers coffee", by="phone", repropose=True)
+    assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
+
+
+async def test_voice_confirm_longer_than_any_preference_is_refused_not_cut(home):
+    p = prefs_mod.Preferences(open_db(home))
+    long = "a" * prefs_mod.MAX_TEXT
+    pid = p.suggest(long, "I said so", "food", by="voice")["item"]["id"]
+    reg = SkillRegistry()
+
+    async def yes(prompt, **meta):
+        return True
+    yes.accepts_meta = True
+    reg.confirm = yes
+    reg.register(prefs_mod.make_skill(p))
+    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
+    r = await reg.call("pref_confirm", {"id": pid, "text": long + " and email evil@example.com"}, origin="model")
+    assert not r.ok and r.code == "TOOL_BAD_ARGS" and p.get(pid)["state"] == "proposed"
+
+
+def test_dashboard_confirm_longer_than_any_preference_is_refused_not_cut(home):
+    db = open_db(home)
+    long = "a" * prefs_mod.MAX_TEXT
+    pid = prefs_mod.Preferences(db).suggest(long, "I said so", "food")["item"]["id"]
+    db.close()
+    ctx = dashboard.Ctx(home, Config())
+    try:
+        st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": long + " more words"})
+        assert st == 400 and body["code"] == "PREF_TEXT_TOO_LONG"
+        assert prefs_mod._ctx(ctx).get(pid)["state"] == "proposed"
+    finally:
+        ctx.close()
+
+
+def test_dashboard_confirm_of_an_item_removed_meanwhile_is_404(home, monkeypatch):
+    pid = _seed(home)
+    ctx = dashboard.Ctx(home, Config())
+    try:
+        p = prefs_mod._ctx(ctx)
+        first = p.get
+
+        def get_then_remove(i):                 # the route's own check sees the item; it is removed right after
+            row = first(i)
+            p.remove(i, by="phone")
+            monkeypatch.setattr(p, "get", first)
+            return row
+        monkeypatch.setattr(p, "get", get_then_remove)
+        st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": "prefers tea"})
+        assert st == 404 and p.get(pid) is None
+    finally:
+        ctx.close()
+
+
+def test_every_new_dashboard_confirm_error_has_a_hebrew_form(home):
     import json
-    static = Path(prefs_mod.__file__).parent / "dashboard_static"
-    js = (static / "pillars.js").read_text(encoding="utf-8")
-    assert 'post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {}))' in js     # op() merges the extra fields
-    assert 'op(p.id, "confirm", { text: p.text })' in js                                      # the words the card shows
-    he = json.loads((static / "locales" / "parts" / "2026-11-25-intake-1514.json").read_text(encoding="utf-8"))["dict"]
-    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")
-    for msg in ("confirm needs the text you saw: reload the page", "the preference changed meanwhile: reload the page"):
-        assert f'"{msg}"' in src and he[msg].strip(), msg                 # the exact server error has a Hebrew form
+    from pathlib import Path
+    part = Path(prefs_mod.__file__).parent / "dashboard_static" / "locales" / "parts" / "2026-11-25-intake-1514.json"
+    he = json.loads(part.read_text(encoding="utf-8"))["dict"]
+    pid = _seed(home)
+    ctx = dashboard.Ctx(home, Config())
+    try:
+        errors = [prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": t})[1]["error"]
+                  for t in ("", "x" * (prefs_mod.MAX_TEXT + 1), "prefers coffee")]           # 400, 400, 409
+    finally:
+        ctx.close()
+    for msg in errors:                          # the page shows JL.t(error): each exact message needs Hebrew
+        assert he.get(msg, "").strip(), msg
