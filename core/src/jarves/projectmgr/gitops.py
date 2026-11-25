@@ -136,6 +136,16 @@ def _entry(repo: str, wt: Path) -> str:
     raise GitError(f"task folder {Path(wt).name} has no worktree entry in the owner repository")
 
 
+def _names_folder(entry: str, wt: Path) -> bool:
+    try:
+        return _key((Path(entry) / "gitdir").read_text(encoding="utf-8").strip()) == _key(Path(wt) / ".git")
+    except OSError:
+        return False
+
+
+_PRIVATE_MARK = "jarves-private"   # in the owner-side entry: this install gave the folder its own .git (#1785 R2)
+
+
 def _private_git(wt: Path) -> bool:
     """True when `<wt>/.git` is the folder's own real directory: not a symlink, not a Windows junction, no
     `commondir` (a linked worktree's), and its real path is inside the folder (#1599 review R1 of 62e7f42)."""
@@ -165,6 +175,8 @@ def _task_env(cwd: str | Path) -> dict[str, str]:
     k = _key(wt)
     with _REG_LOCK:
         entry, repo = _ENTRIES.get(k), _PROJECTS.get(_key(wt.parent.parent))
+    if entry and not _names_folder(entry, wt):     # pruned or re-added by the owner since: find it again (#1785 R3)
+        entry = ""
     if not entry:
         if not repo:
             raise GitError(f"task folder {wt.name} belongs to no registered project")
@@ -362,9 +374,10 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
     entry = _entry(repo, wt)                                 # from the owner's side, before the link goes
     with _REG_LOCK:
         _ENTRIES[_key(wt)] = entry
-    if not _gitfile_names(dotgit, entry):                    # not an older install's link: make the repair visible
+    older = _gitfile_names(dotgit, entry)
+    if not older or (Path(entry) / _PRIVATE_MARK).exists():  # not an older install's link: make the repair visible
         logs.warn("projects", "TASK_GIT_REPLACED", "a task folder's .git was not its own; JARVES replaced it",
-                  path=wt.name, kind=_git_kind(dotgit))
+                  path=wt.name, kind="gitfile-after-private" if older else _git_kind(dotgit))
     tmp = wt.with_name(f".{wt.name}.clone")
     with _repo_lock(repo):
         _rmtree(tmp)
@@ -382,6 +395,7 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
                 if moved:
                     os.replace(tmp / "old.gitlink", dotgit)
                 raise GitError(f"task folder {wt.name}: could not give it its own .git: {e}"[:300]) from e
+            (Path(entry) / _PRIVATE_MARK).write_text("1\n", encoding="utf-8")
         finally:
             _rmtree(tmp)
 

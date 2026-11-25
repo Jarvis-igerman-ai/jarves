@@ -428,12 +428,36 @@ def test_adoption_logs_a_git_that_is_not_an_older_install_link(tmp_path, monkeyp
     seen = []
     monkeypatch.setattr(gitops.logs, "warn", lambda comp, code, msg, **f: seen.append((code, f["kind"])))
     entry, br = gitops._ENTRIES[gitops._key(wt)], gitops.task_branch(1, 1, 1)
-    for text, want in ((f"gitdir: {entry}\n", []), (f"gitdir: {tmp_path}\n", [("TASK_GIT_REPLACED", "gitfile-elsewhere")])):
+    for text, mark, want in ((f"gitdir: {entry}\n", False, []),     # an older install: never made private here
+                             (f"gitdir: {entry}\n", True, [("TASK_GIT_REPLACED", "gitfile-after-private")]),  # R2
+                             (f"gitdir: {tmp_path}\n", True, [("TASK_GIT_REPLACED", "gitfile-elsewhere")])):
         seen.clear()
+        if not mark:
+            (Path(entry) / gitops._PRIVATE_MARK).unlink()
         gitops._rmtree(wt / ".git")
         (wt / ".git").write_text(text, encoding="utf-8")
         gitops.adopt_task_folder(str(repo), wt, br)
         assert seen == want and (wt / ".git").is_dir()
+
+
+def test_a_stale_cached_entry_is_found_again(tmp_path):
+    """#1785 R3: the owner prunes and re-adds the folder's entry under another id; JARVES's git follows the new entry
+    instead of the cached one."""
+    repo, _home, wt = _task(tmp_path)
+    old = Path(gitops._ENTRIES[gitops._key(wt)])
+    new = old.with_name(old.name + "x")
+    old.rename(new)                                          # same effect as prune + re-add under a new id
+    (wt / "f.txt").write_text("agent\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "jarves")
+    assert gitops._ENTRIES[gitops._key(wt)] == str(new)
+
+
+def test_the_repo_lock_is_reentrant(tmp_path):
+    """#1785 R5: new_task_worktree holds _repo_lock while adopt_task_folder takes it again; a plain Lock deadlocks."""
+    lock = gitops._repo_lock(tmp_path)
+    with lock:
+        assert gitops._repo_lock(tmp_path).acquire(blocking=False)
+        gitops._repo_lock(tmp_path).release()
 
 
 def test_a_pointer_planted_next_to_the_folder_never_redirects_jarves_git(tmp_path):
