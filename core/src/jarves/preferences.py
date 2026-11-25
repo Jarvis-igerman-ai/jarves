@@ -333,7 +333,14 @@ def make_skill(prefs: Preferences):
             async def confirm(a: ConfirmArgs):
                 if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
-                try:                          # #1514: confirm only the words the owner was shown in the approval
+                # #1514: confirm only the words the approval popup showed. confirm_meta records them on this same args
+                # object (SkillRegistry._call passes one instance to _authorize and _run). No recorded words = refuse:
+                # fail closed, never confirm by id alone.
+                if a._shown is None:
+                    logs.warn("prefs", "PREF_CONFIRM_UNSHOWN", "confirm without shown words: not applied", id=a.id)
+                    return ToolResult(False, "the owner was not shown the wording: nothing saved; ask again",
+                                      code="PREF_NOT_SHOWN")
+                try:
                     r = prefs.confirm(a.id, by="voice", expect=a._shown)
                 except KeyError:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
@@ -458,7 +465,8 @@ def api_pref_op(ctx, m, body):
     except KeyError:
         return 404, {"error": "no such preference"}
     except PrefConflict:
-        return 409, {"error": "the preference changed meanwhile: try again", "code": "PREF_CONFLICT"}
+        return 409, {"error": "the preference changed meanwhile: reload the page to see the new wording",
+                     "code": "PREF_CONFLICT"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
 
 

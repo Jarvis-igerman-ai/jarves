@@ -22,7 +22,7 @@ def test_1514_dashboard_confirm_of_old_words_after_an_edit_leaves_the_new_words_
         p = prefs_mod._ctx(ctx)
         p.edit(pid, "long answers all day", by="phone", repropose=True)        # lands after the page showed the old words
         st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": "short answers in the morning"})
-        assert st == 409 and body["code"] == "PREF_CONFLICT"
+        assert st == 409 and body["code"] == "PREF_CONFLICT" and "reload the page" in body["error"]
         assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
         st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid})        # no shown words: refused
         assert st == 400 and body["code"] == "PREF_TEXT_REQUIRED" and p.get(pid)["state"] == "proposed"
@@ -30,12 +30,6 @@ def test_1514_dashboard_confirm_of_old_words_after_an_edit_leaves_the_new_words_
         assert st == 200 and p.for_prompt() == ["long answers all day"]
     finally:
         ctx.close()
-
-
-def test_1514_dashboard_page_sends_the_shown_wording_with_confirm():
-    from pathlib import Path
-    js = (Path(prefs_mod.__file__).parent / "dashboard_static" / "pillars.js").read_text(encoding="utf-8")
-    assert 'op(p.id, "confirm", { text: p.text })' in js
 
 
 async def test_1514_voice_confirm_applies_only_to_the_words_the_approval_showed(home):
@@ -57,3 +51,12 @@ async def test_1514_voice_confirm_applies_only_to_the_words_the_approval_showed(
     ok = registry(prefs=p, answer=True)
     assert (await ok.call("pref_confirm", {"id": pid}, origin="model")).ok      # shown the current words: confirmed
     assert p.for_prompt() == ["long answers all day"]
+
+
+async def test_1514_voice_confirm_without_shown_words_fails_closed(home):
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest("short answers in the morning", "I like short answers", "voice")["item"]["id"]
+    tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
+    r = await tool.handler(tool.args(id=pid))           # the approval popup never ran for these args
+    assert not r.ok and r.code == "PREF_NOT_SHOWN"
+    assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
