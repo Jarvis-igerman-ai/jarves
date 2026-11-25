@@ -5,6 +5,7 @@ Date: 2026-11-09 (findings authored); re-checked 2026-11-23.
 re-read there with `git show 25f0a54:<file>`. Read the anchors at that commit, not at a newer main.
 Drift: by `main` fae76ae, `projectmgr/{gitops,forge,service,surfaces}.py` had changed (#1390, #1407, #1722), so
 anchors in those files may have moved; they were not re-mapped, and the findings were not re-checked against that code.
+So #5, #6, #11 and #12 (all citing `gitops.py`) need re-mapping against current main before anyone fixes them.
 The other cited files (`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`, `projectmgr/{engine,runners}`)
 are byte-identical between 25f0a54 and fae76ae (`git diff --stat` empty), so their anchors still hold there.
 "At review time" means only the old 2026-11-09 behaviour. It never refers to a line number.
@@ -12,7 +13,7 @@ Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `c
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
 Not read in full: `projectmgr/{engine,pipeline,surfaces,cards,debate,plan}.py`, and the route and auth layers that call
-these modules.
+these modules. Exception: the `_run_agent` call at `engine.py:275` (cited by #12) was read at 25f0a54.
 Earlier reviews: `V5_SECURITY_REVIEW_PILLARS_2026-10-25.md` and the V6 review. This report contains no secrets.
 Gap: the council review of the first version (PR #979: opus 7, gpt 5 findings) arrived truncated (1 of 12). The other
 11 findings never arrived and are **not reflected here** (UNVERIFIED whether they are covered). #979 has no GitHub
