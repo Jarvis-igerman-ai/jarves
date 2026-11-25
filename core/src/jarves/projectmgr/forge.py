@@ -110,9 +110,16 @@ def _check_push_target(url: str, got: list[str]) -> None:
     want = slug(url)
     m = slug(got[0]) if len(got) == 1 and _PUSH_URL.match(got[0]) else None
     if not (m and want and [x.lower() for x in m.group(1, 2)] == [x.lower() for x in want.group(1, 2)]):
+        shown = ", ".join(_no_userinfo(g) for g in got)[:200] or "none"
         raise ForgeError("JARVES will not push: your global git config rewrites the origin URL to another target or "
-                         f"an unsupported URL form ({', '.join(got)[:200] or 'none'}; allowed: {PUSH_URL_FORMS} of the "
-                         "same repository); remove that url.*.insteadOf/pushInsteadOf rule")
+                         f"an unsupported URL form ({shown}; allowed: {PUSH_URL_FORMS} of the same repository). Remove "
+                         "that url.*.insteadOf/pushInsteadOf rule; a user or token in a rewritten URL is refused too: "
+                         "sign in with a credential helper (gh auth setup-git) or use ssh")
+
+
+def _no_userinfo(u: str) -> str:
+    """Review R1: a token in a rewritten URL (https://user:tok@github.com/) never reaches the error text or logs."""
+    return re.sub(r"^[^/@:]*@", "***@", re.sub(r"(?<=//)[^/]*@", "***@", u))
 
 
 def push_branch(path: str, branch: str) -> None:

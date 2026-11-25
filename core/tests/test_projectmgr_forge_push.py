@@ -217,7 +217,7 @@ def test_a_global_pushurl_for_the_origin_url_is_not_used(tmp_path, home):
     subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
     _global(f"[remote \"{URL}\"]\n\tpushurl = {evil.as_posix()}\n")
     neg = _plain(repo, "push", URL, BRANCH)
-    assert _on(evil), neg.stderr                                             # negative control: plain git obeys it
+    assert neg.returncode == 0 and _on(evil), neg.stderr   # negative control: plain git obeys it
     subprocess.run(["git", "--git-dir", str(evil), "branch", "-D", BRANCH], check=True, capture_output=True)
     forge.push_branch(str(repo), BRANCH)
     assert _on(home) and not _on(evil)
@@ -235,6 +235,15 @@ def test_check_push_target(got, ok):
     else:
         with pytest.raises(forge.ForgeError, match="another target or an unsupported URL form"):
             forge._check_push_target(URL, got)
+
+
+@pytest.mark.parametrize("got", ["https://u:ghp_secret@github.com/o/r.git", "https://ghp_secret@evil.invalid/o/r",
+                                 "ssh://ghp_secret@github.com/o/r", "ghp_secret@github.com:o/r.git"])
+def test_a_token_in_a_rewritten_url_is_refused_and_not_shown(got):
+    """Review R1/R2 (round 2): a token-bearing global insteadOf is refused, and the token is not in the message."""
+    with pytest.raises(forge.ForgeError, match="credential helper") as e:
+        forge._check_push_target(URL, [got])
+    assert "ghp_secret" not in str(e.value) and "***@" in str(e.value)
 
 
 def test_the_unwrapped_check_refuses_the_harness_bare_repository(tmp_path):
