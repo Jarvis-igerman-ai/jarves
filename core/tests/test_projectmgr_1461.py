@@ -15,8 +15,9 @@ COMMIT_EVIL = ("import subprocess as s; open('a.txt','w').write('evil'); "
 
 
 def _sibling_commit(wt) -> None:
+    """Moves the task branch itself (#1599: a plain `git commit` in the folder only reaches its private copy)."""
     (Path(wt) / "a.txt").write_text("evil")
-    sh(wt, *GIT, "commit", "-qam", "sibling", "--no-verify")
+    gitops.git(wt, "commit", "-qam", "sibling", "--no-verify")
 
 
 def _after_check(m, then) -> None:
@@ -68,17 +69,28 @@ def test_retry_after_a_moved_branch_runs_the_work_and_check_again(env):
     assert (_integ(home) / "a.txt").read_text() == "1\n"              # the content the second check saw
 
 
-def test_branch_moved_while_the_check_runs_is_not_merged(env):
+def test_a_check_that_commits_in_the_task_folder_never_moves_the_branch(env):
+    """#1599: the check's cwd is the task folder; its `git commit` reaches only the folder's private `.git`, never
+    the task branch (#1461 saw it as a moved branch). Its uncommitted edit is folded and checked again (#1461)."""
     m, repo, home = env
-    _start(m, repo, [sys.executable, "-c", COMMIT_EVIL])               # the check's cwd is the task folder
+    _start(m, repo, [sys.executable, "-c", COMMIT_EVIL.replace("check=True", "check=False")])   # runs twice
     finish(m)
-    _blocked(m, home, "moved while JARVES checked it")
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    log = sh(_integ(home), "git", "log", "--format=%s").split("\n")
+    assert "evil" not in log and any(x.startswith("task 1") for x in log)
 
 
-def test_branch_moved_during_the_merge_stage_recheck_is_not_merged(env):
+def test_branch_moved_during_the_merge_stage_recheck_is_not_merged(env, monkeypatch):
     m, repo, home = env
-    flag = home.parent / "recheck"
-    check = [sys.executable, "-c", f"import os\nif os.path.exists(r'{flag}'):\n    " + COMMIT_EVIL.replace("; ", "\n    ")]
+    flag, real = home.parent / "recheck", gitops.run_check
+
+    def check_moves(wt, argv, **kw):                                   # #1599: the move is the branch's own
+        if flag.exists() and "wt" in Path(wt).parts:
+            _sibling_commit(wt)
+        return real(wt, argv, **kw)
+    monkeypatch.setattr(engine.gitops, "run_check", check_moves)
+    check = [sys.executable, "-c", "pass"]
 
     def newer_work_lands(t):                                           # the integration branch moves after the check
         flag.write_text("x")
@@ -136,7 +148,7 @@ def test_sibling_commit_before_the_owner_approves_is_not_an_owner_edit(env):
     m, repo, home = env
     wt = _owner_task(m, repo, [sys.executable, "-c", "pass"])
     (wt / "mine.txt").write_text("evil\n")
-    sh(wt, *GIT, "commit", "-qam", "sibling", "--no-verify")
+    gitops.git(wt, "commit", "-qam", "sibling", "--no-verify")       # moves the task branch itself (#1599)
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)

@@ -2,6 +2,7 @@
 own git calls. An agent can write `.git/config`, an included file and `.git/info/attributes` (no commit needed)."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -353,3 +354,79 @@ def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):
     r = gitops.git(repo, "rev-list", "--count", other)
     assert r.stdout.strip() == "2"                         # git may still print its graft-deprecation hint: fine
     assert "warning" not in r.stderr and "unable to access" not in r.stderr     # but no error opening the graft path
+
+
+def _task(tmp_path: Path):
+    repo, home = _repo(tmp_path), tmp_path / "home"
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    return repo, wt
+
+
+def test_a_filter_an_agent_adds_after_the_config_read_never_runs(tmp_path, monkeypatch):
+    """#1599: git() reads the config once, then git reads it again. An agent running `git config` in its folder
+    between the two reads must not reach the config JARVES's git loads: the folder's `.git` is its own copy."""
+    repo, wt = _task(tmp_path)
+    marker, real, calls = tmp_path / "ran.txt", gitops.shared_config_overrides, []
+
+    def racing(cwd):
+        env = real(cwd)
+        calls.append(cwd)
+        if len(calls) == 2:                     # commit_all: ls-files, then `add -A` (the clean filter's call)
+            subprocess.run(["git", "config", "filter.late.clean", _sh(marker)], cwd=wt, check=True)   # the agent
+        return env
+    monkeypatch.setattr(gitops, "shared_config_overrides", racing)
+    (wt / ".gitattributes").write_text("* filter=late\n", encoding="utf-8")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    assert not marker.exists()
+    assert "late" not in (repo / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_the_owner_config_still_has_its_filters_blanked_in_a_task_folder(tmp_path):
+    """#1599 (review R1 of #1785): JARVES's git on a task folder loads the owner-side config, so the names there
+    are the ones blanked."""
+    repo, wt = _task(tmp_path)
+    marker = tmp_path / "ran.txt"
+    _cfg(repo, "filter.x.clean", _sh(marker))
+    (wt / ".gitattributes").write_text("* filter=x\n", encoding="utf-8")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    assert not marker.exists()
+
+
+def test_the_task_folder_git_works_for_the_agent_and_stays_private(tmp_path):
+    """#1599: the agent sees its branch, tip and a clean status; its own commits stay in its copy."""
+    repo, wt = _task(tmp_path)
+    plain = {"cwd": wt, "capture_output": True, "text": True, "check": True}
+    assert (wt / ".git").is_dir()
+    tip = gitops.git(repo, "rev-parse", gitops.task_branch(1, 1, 1)).stdout.strip()
+    assert subprocess.run(["git", "rev-parse", "HEAD"], **plain).stdout.strip() == tip
+    assert subprocess.run(["git", "status", "--porcelain"], **plain).stdout == ""
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], **plain)
+    subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "agent"], **plain)
+    assert gitops.git(repo, "rev-parse", gitops.task_branch(1, 1, 1)).stdout.strip() == tip
+    assert gitops.commit_all(wt, "jarves")                      # JARVES commits the folder's content itself
+    assert "a.py" in gitops.changed_files(wt, gitops.integration_branch(1))
+
+
+def test_a_task_folder_is_adopted_again_after_a_restart_or_fails_closed(tmp_path):
+    """#1599: after a restart (an empty registry) or on an older install's folder (`.git` still a gitfile into the
+    owner's repository) JARVES adopts the folder through the integration worktree; without one it refuses."""
+    repo, wt = _task(tmp_path)
+    saved = dict(gitops._TASK_GIT)
+    try:
+        gitops._TASK_GIT.clear()
+        shutil.rmtree(wt / ".git")
+        entry = next((repo / ".git" / "worktrees").glob("t1-a1*"))
+        (wt / ".git").write_text(f"gitdir: {entry}\n", encoding="utf-8")             # as an older install left it
+        assert gitops.git(wt, "status", "--porcelain").stdout == ""
+        assert (wt / ".git").is_dir()                                             # now a private copy
+        gitops._TASK_GIT.clear()
+        (wt.parent.parent / "integration").rename(wt.parent.parent / "gone")
+        with pytest.raises(gitops.GitError, match="not adopted"):
+            gitops.git(wt, "status")
+    finally:
+        gitops._TASK_GIT.clear()
+        gitops._TASK_GIT.update(saved)
