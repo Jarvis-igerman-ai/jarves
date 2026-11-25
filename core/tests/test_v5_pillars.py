@@ -229,10 +229,10 @@ async def test_preference_is_only_a_proposal_until_the_owner_confirms(home):
     assert r.ok and r.data["status"] == "proposed" and not asked
     pid = r.data["item"]["id"]
     assert p.for_prompt() == []                                           # a proposal influences nothing
-    r = await reg.call("pref_confirm", {"id": pid}, origin="model")       # the owner is asked and says no
+    r = await reg.call("pref_confirm", {"id": pid, "text": "short answers in the morning"}, origin="model")       # the owner is asked and says no
     assert not r.ok and asked and p.get(pid)["state"] == "proposed" and p.for_prompt() == []
     yes = registry(prefs=p, answer=True, asked=asked)
-    r = await yes.call("pref_confirm", {"id": pid}, origin="model")
+    r = await yes.call("pref_confirm", {"id": pid, "text": "short answers in the morning"}, origin="model")
     assert r.ok and p.get(pid)["state"] == "confirmed" and p.for_prompt() == ["short answers in the morning"]
     shown = await yes.call("pref_show", {}, origin="model")
     assert shown.ok and "short answers" in shown.message
@@ -315,7 +315,7 @@ def test_dashboard_and_cli_show_edit_and_remove_every_learned_item(home, capsys)
     try:
         st, body = prefs_mod.api_prefs(ctx, None, None)
         assert st == 200 and body["proposed"][0]["evidence"] == "I prefer tea to coffee" and body["items"] == []
-        assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid})[0] == 200
+        assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": "prefers tea"})[0] == 200
         assert prefs_mod.api_prefs(ctx, None, None)[1]["items"][0]["text"] == "prefers tea"
         assert prefs_mod.api_pref_op(ctx, None, {"op": "edit", "id": pid, "text": "prefers green tea"})[0] == 200
         assert prefs_mod.api_pref_op(ctx, None, {"op": "edit", "id": pid, "text": "password 12345678"})[0] == 400

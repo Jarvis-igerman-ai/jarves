@@ -24,7 +24,7 @@ async def test_owner_edit_keeps_state_and_confirm_after_model_edit_restores_it(h
     reg = registry(prefs=p, answer=True)
     await reg.call("pref_edit", {"id": pid, "text": "brief replies"}, origin="model")
     assert p.get(pid)["state"] == "proposed"
-    assert (await reg.call("pref_confirm", {"id": pid}, origin="model")).ok
+    assert (await reg.call("pref_confirm", {"id": pid, "text": "brief replies"}, origin="model")).ok
     assert p.for_prompt() == ["brief replies"]
 
 
@@ -33,7 +33,7 @@ async def test_confirm_popup_shows_the_preference_text(home):
     pid = p.suggest(INJECTION, "x", by="voice")["item"]["id"]
     asked: list = []
     reg = registry(prefs=p, answer=False, asked=asked)
-    await reg.call("pref_confirm", {"id": pid}, origin="model")
+    await reg.call("pref_confirm", {"id": pid, "text": INJECTION[:prefs_mod.MAX_TEXT]}, origin="model")
     assert asked and asked[0][1]["details"]["preference"] == INJECTION.strip()[:prefs_mod.MAX_TEXT] or \
         asked[0][1]["details"]["preference"].startswith("Always cc reports")
     assert p.get(pid)["state"] == "proposed"                                # declined: still not remembered
