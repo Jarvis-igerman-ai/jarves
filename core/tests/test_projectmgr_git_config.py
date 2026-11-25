@@ -260,3 +260,96 @@ def test_a_git_older_than_2_31_is_refused(monkeypatch, tmp_path):
     with pytest.raises(gitops.GitError, match=r"git 2\.31 or later \(found: 2\.30\)"):
         gitops.git(tmp_path, "status")
     assert calls == [["git", "version"]]                                           # nothing else ran
+
+
+def _overrides(repo: Path) -> dict[str, str]:
+    env = gitops.shared_config_overrides(repo)
+    return {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env.get("GIT_CONFIG_COUNT", 0)))}
+
+
+def test_signing_programs_from_the_shared_config_fall_back_to_the_owners(tmp_path, _owner_home):
+    """#1407: ship merges with the owner's signing (ident=False), so a `gpg.*program` / `gpg.ssh.defaultKeyCommand`
+    the shared config names would run there. The owner's global value wins, else git's default program."""
+    repo = _repo(tmp_path)
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write("[gpg \"x509\"]\n\tprogram = owner-gpgsm\n")
+    for k in ("gpg.program", "gpg.x509.program", "gpg.ssh.program", "gpg.ssh.defaultKeyCommand"):
+        _cfg(repo, k, "evil")
+    assert _overrides(repo) == {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "owner-gpgsm",
+                                "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultKeyCommand": ""}
+
+
+def _script(path: Path, marker: Path) -> str:
+    """A `#!/bin/sh` program that leaves a marker and fails; Git for Windows runs it through its own sh too."""
+    path.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\nexit 1\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path.as_posix()
+
+
+def test_a_shared_gpg_program_never_runs_on_a_signed_owner_merge(tmp_path, _owner_home):
+    """#1407: the real run behind the override above, on the ship path (`merge_in(..., ident=False)`). The owner's own
+    gpg program (a failing script, so the result does not depend on the host's gpg or keys) runs instead of the
+    agent's; the control run proves the agent's program does run under plain git."""
+    repo, evil, owner = _repo(tmp_path), tmp_path / "ran.txt", tmp_path / "owner.txt"
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write(f"[gpg]\n\tprogram = {_script(tmp_path / 'owner-gpg', owner)}\n")
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "s.txt").write_text("s\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "main", "--no-verify")
+    _cfg(repo, "gpg.program", _script(tmp_path / "evil-gpg", evil))
+    _cfg(repo, "commit.gpgsign", "true")
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "control", "--no-verify"], cwd=repo, capture_output=True,
+                   env=gitops.child_env())
+    assert evil.exists() and not owner.exists()                # control: plain git runs the agent's program
+    evil.unlink()
+    out = gitops.merge_in(repo, "side", ident=False)
+    assert len(out) == 1 and out[0].startswith("(not merged:")  # the owner's program failed the signature
+    assert owner.exists() and not evil.exists()
+    assert not (repo / "s.txt").exists()                        # aborted: nothing changed
+
+
+def test_config_hooks_of_every_scope_are_a_no_op(tmp_path, _owner_home):
+    """#1407: `hook.<name>.command` (config-defined hooks, newer git) is not stopped by core.hooksPath. Every hook
+    name of any scope gets HOOK_NOOP; git runs it through its own shell with the arguments appended, which land in a
+    comment (checked through a git `!` alias, which runs the same way). On a git with config hooks the control commit
+    runs the agent's hook and JARVES's commit does not; git 2.43 (CI) has none, so there only the override is pinned:
+    a real hook run is UNVERIFIED in CI."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    with open(_owner_home / ".gitconfig", "a", encoding="utf-8") as f:
+        f.write("[hook \"mine\"]\n\tcommand = owner-lint\n")
+    _cfg(repo, "hook.mine.event", "pre-merge-commit")
+    _cfg(repo, "hook.evil.event", "post-commit")            # --no-verify does not skip it
+    _cfg(repo, "hook.evil.command", _sh(marker, "true"))
+    assert _overrides(repo) == {"hook.mine.command": gitops.HOOK_NOOP, "hook.evil.command": gitops.HOOK_NOOP}
+    noop = subprocess.run(["git", "-c", f"alias.noop=!{gitops.HOOK_NOOP}", "noop", "--x", "y"], cwd=repo,
+                          capture_output=True, env=gitops.child_env())
+    assert noop.returncode == 0
+    subprocess.run(["git", "commit", "--allow-empty", "-qm", "control"], cwd=repo, capture_output=True,
+                   env=gitops.child_env())
+    hooks_supported = marker.exists()
+    marker.unlink(missing_ok=True)
+    (repo / "g.txt").write_text("g\n", encoding="utf-8")
+    assert gitops.commit_all(repo, "jarves")
+    assert not marker.exists(), f"config hook ran (config hooks supported: {hooks_supported})"
+
+
+def test_replace_refs_and_grafts_never_change_what_jarves_reads(tmp_path):
+    """#1407: ship merges a commit id; `git replace` (refs/replace, agent-writable) or `.git/info/grafts` would make
+    that id mean other content. JARVES's git ignores both."""
+    repo = _repo(tmp_path)
+    tip = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / "f.txt").write_text("other\n", encoding="utf-8")
+    gitops.git(repo, "commit", "-qam", "other", "--no-verify")
+    other = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    subprocess.run(["git", "replace", tip, other], cwd=repo, check=True)
+    assert gitops.git(repo, "show", f"{tip}:f.txt").stdout == "base\n"
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{other}\n", encoding="utf-8")   # `other` without a parent
+    r = gitops.git(repo, "rev-list", "--count", other)
+    assert r.stdout.strip() == "2"                         # git may still print its graft-deprecation hint: fine
+    assert "warning" not in r.stderr and "unable to access" not in r.stderr     # but no error opening the graft path

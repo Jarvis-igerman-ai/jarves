@@ -73,6 +73,16 @@ NO_HOOKS = _no_hooks_path()
 # diff drivers and diff.external on a diff, whenever a .gitattributes or `.git/info/attributes` entry names them
 _DRIVER_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process|required)|merge\.(.+)\.driver"
                          r"|diff\.(.+)\.(command|textconv)|diff\.external)$", re.S)
+# (#1407) programs git runs to sign (the ship merge uses the owner's signing): owner value, else git's default program
+_GPG_KEYS = {"gpg.program": "openpgp", "gpg.openpgp.program": "openpgp", "gpg.x509.program": "x509",
+             "gpg.ssh.program": "ssh", "gpg.ssh.defaultkeycommand": "sshkey"}
+# "" for the key command: git treats an empty value as no command (checked on git 2.43: an ssh-signed commit with a
+# user.signingKey still works, nothing runs); without a key git then fails with its own error, closed
+_GPG_DEFAULT = {"openpgp": "gpg", "x509": "gpgsm", "ssh": "ssh-keygen", "sshkey": ""}
+_GPG_OUT = {"openpgp": ("gpg.program", "gpg.openpgp.program"), "x509": ("gpg.x509.program",),
+            "ssh": ("gpg.ssh.program",), "sshkey": ("gpg.ssh.defaultKeyCommand",)}
+_HOOK_KEY = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)   # config-defined hooks (newer git): not stopped by core.hooksPath
+HOOK_NOOP = "exit 0 #"                     # run through sh with "$@" appended: the arguments become a comment
 _SUBMODULE_KEY = re.compile(r"^submodule\.(.+)\.[^.]+$", re.S)
 _SHARED_SCOPES = ("local", "worktree")      # the repository's own config: agents can write it through `.git`
 MIN_GIT = (2, 31)                           # GIT_CONFIG_COUNT/KEY/VALUE: older git ignores them (fails open)
@@ -95,9 +105,9 @@ def require_git(cwd: str | Path) -> None:
     _GIT_OK.append(True)
 
 
-def _pairs(out: str) -> list[tuple[str, str]]:
+def _pairs(out: str) -> list[tuple[str, str, str]]:
     parts = (out or "").split("\0")
-    return [(scope, entry.split("\n", 1)[0]) for scope, entry in zip(parts[0::2], parts[1::2])]
+    return [(scope, *(entry.split("\n", 1) + [""])[:2]) for scope, entry in zip(parts[0::2], parts[1::2])]
 
 
 def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
@@ -112,7 +122,7 @@ def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
     merge never look inside its work tree (gitlink commit changes still show). Fails closed: an unreadable config
     raises GitError."""
     require_git(cwd)
-    p = _run(cwd, "config", "--show-scope", "-z", "--get-regexp", r"^(filter|merge|diff|submodule)\.")
+    p = _run(cwd, "config", "--show-scope", "-z", "--get-regexp", r"^(filter|merge|diff|submodule|gpg|hook)\.")
     if p.returncode not in (0, 1):                                        # 1: no key matched (or not a repository)
         raise GitError(f"cannot read the shared git config: {(p.stderr or '').strip()}"[:300])
     entries = _pairs(p.stdout)
@@ -120,13 +130,21 @@ def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
         g = _run(cwd, "config", "-f", ".gitmodules", "-z", "--get-regexp", r"^submodule\.")
         if g.returncode not in (0, 1):
             raise GitError(f"cannot read .gitmodules: {(g.stderr or '').strip()}"[:300])
-        entries += [("gitmodules", e.split("\n", 1)[0]) for e in (g.stdout or "").split("\0") if e]
+        entries += [("gitmodules", e.split("\n", 1)[0], "") for e in (g.stdout or "").split("\0") if e]
     keys: dict[str, str] = {}
     owner_filters: set[str] = set()
     shared_filters: set[str] = set()
-    for scope, key in entries:
-        sm, m = _SUBMODULE_KEY.match(key), _DRIVER_KEY.match(key)
-        if sm:
+    owner_gpg: dict[str, str] = {}
+    shared_gpg: set[str] = set()
+    for scope, key, value in entries:
+        sm, m, hk, gk = _SUBMODULE_KEY.match(key), _DRIVER_KEY.match(key), _HOOK_KEY.match(key), _GPG_KEYS.get(key)
+        if gk and scope in _SHARED_SCOPES:
+            shared_gpg.add(gk)
+        elif gk:                                                          # read order: the last owner value wins
+            owner_gpg[gk] = value
+        elif hk:                                                          # every scope: no hook runs (#1381)
+            keys[f"hook.{hk.group(1)}.command"] = HOOK_NOOP
+        elif sm:
             keys[f"submodule.{sm.group(1)}.ignore"] = "dirty"
         elif not m:
             continue
@@ -144,6 +162,8 @@ def shared_config_overrides(cwd: str | Path) -> dict[str, str]:
         raise GitError(f"the repository's own git config redefines your filter {clash[0]!r}; JARVES will not run "
                        "git here (remove the repository-level filter keys, e.g. `git config --local "
                        f"--remove-section filter.{clash[0]}`)"[:300])
+    for gk in sorted(shared_gpg):
+        keys.update({k: owner_gpg.get(gk, _GPG_DEFAULT[gk]) for k in _GPG_OUT[gk]})
     env = {"GIT_CONFIG_COUNT": str(len(keys))} if keys else {}
     for i, (k, v) in enumerate(keys.items()):
         env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
@@ -160,15 +180,17 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Commands named in the shared config by filter/merge/diff drivers are
     blanked (#1390, see shared_config_overrides); the editors are `:`; submodules are never recursed into or
     checked for changes. `args` must start with the subcommand: any global option (-C, --git-dir, --exec-path...)
-    could run git elsewhere than the repository whose config was read. Not covered: gpg.program, core.sshCommand,
-    core.askPass, credential helpers, transport commands (remote.<x>.uploadpack/receivepack, ext:: URLs),
-    core.alternateRefsCommand, config-defined hooks (`hook.<name>.command`), and a key added between the config
-    read and the command (one read per call)."""
+    could run git elsewhere than the repository whose config was read. Signing programs from the shared config fall
+    back to the owner's (#1407); every config-defined hook command is HOOK_NOOP; replace refs and grafts are ignored.
+    Not covered: core.sshCommand, core.askPass, credential helpers, transport commands (remote.<x>.uploadpack/
+    receivepack, ext:: URLs), core.alternateRefsCommand, a shallow file, and a key added between the config read
+    and the command (one read per call)."""
     if args and args[0].startswith("-"):
         raise GitError(f"git() takes the subcommand first, not the global option {args[0].split('=', 1)[0]}")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "submodule.recurse=false", "-c", "diff.ignoreSubmodules=dirty"]
     env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":",
+                     "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": NO_HOOKS,   # #1407: an id is its own content
                      **shared_config_overrides(cwd)})
     if args[:1] in (("diff",), ("show",), ("log",)):   # a blank diff driver fails these; the flags show plain text
         args = (args[0], "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", *args[1:])

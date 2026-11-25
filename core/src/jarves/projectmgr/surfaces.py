@@ -318,6 +318,7 @@ def add_cli(sub) -> None:
     p.add_argument("--base", default="", help="open: start from this branch or commit (default: the branch you are on)")
     p.add_argument("--dirty", action="store_true", help="open: also start from your uncommitted changes (folder untouched)")
     p.add_argument("--apply", action="store_true", help="ship: merge the result into your branch (asks first, never pushes)")
+    p.add_argument("--commit", default="", help="ship --apply: the integration commit you reviewed (refuses if it moved)")
     p.add_argument("--where", default="", help="open NAME: a word of the folder's path to find it, e.g. work")
     p.add_argument("--count", type=int, default=1, help="more / fewer: by how many")
     p.add_argument("--task", default="", help="stop: only this task number")
@@ -487,7 +488,7 @@ def cmd_project(a, cfg, home) -> int:
     elif act == "digest":
         r = svc.call(home, cfg, "digest", hours=a.hours, **kw)
     elif act == "ship":
-        r = svc.call(home, cfg, "ship_plan", apply=a.apply, yes=a.yes, **kw)
+        r = svc.call(home, cfg, "ship_plan", apply=a.apply, yes=a.yes, commit=a.commit, **kw)
     elif act == "config":
         f = {}
         if a.release is not None:
