@@ -72,3 +72,15 @@ def test_existing_sessions_file_is_tightened_at_startup(monkeypatch, tmp_path):
     server.load_sessions(tmp_path)
     server.load_sessions(tmp_path)
     assert [p.name for p in seen] == ["sessions.json"]
+
+
+def test_failed_tighten_is_retried_next_time(monkeypatch, tmp_path):
+    """JAR-824 review R2: a failed tighten must not mark the file done, or it is never retried in this process."""
+    results = [False, True]
+    seen: list[str] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p).name) or results.pop(0))
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    for _ in range(3):
+        server.load_sessions(tmp_path)
+    assert seen == ["sessions.json", "sessions.json"]  # failed, retried and succeeded, then done

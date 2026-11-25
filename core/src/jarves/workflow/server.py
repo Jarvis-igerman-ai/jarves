@@ -73,11 +73,10 @@ _TIGHTENED: set[str] = set()
 
 
 def _tighten_once(path: Path) -> None:
-    """Fix an existing file once per process (idempotent)."""
+    """Fix an existing file once per process (idempotent); a failed attempt is retried on the next call."""
     key = str(path)
-    if key not in _TIGHTENED:
+    if key not in _TIGHTENED and owner_only_file(path):
         _TIGHTENED.add(key)
-        owner_only_file(path)
 
 
 def access_token(home: Path) -> str:
