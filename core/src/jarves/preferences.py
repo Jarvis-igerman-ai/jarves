@@ -59,20 +59,26 @@ _SEED_NEAR = 20
 
 # #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
 # "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
-_KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
-             r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
+# A strong word (api key, client secret, ...) refuses any value after ":"/"="; a weak word (a bare token or key) only
+# a credential-shaped one, so "tokens: 5 left" or "fix token refresh: done" stay allowed (review 4, R1/R4).
+_KEY_WORD = (r"api[\s_-]*key|access[\s_-]*(?:key|token)|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
+             r"מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
+_WEAK_KEY_WORD = r"\btokens?\b|טוקן|\bkeys?\b"
+# a credential-shaped value: 6+ characters with a digit or a non-hyphen symbol, so state words such as "expired",
+# "rotated" or "well-known" are not values
+_CRED = r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}"
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
     rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*\S|"
-    # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword, a bare "key" included) the
-    # value must look like a credential: 6+ characters with a digit or a non-hyphen symbol, so state words such as
-    # "expired", "rotated" or "well-known" stay allowed
-    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
-    r"(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}", re.I)
+    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*{_CRED}|"
+    # after a spoken "is/was/הוא/היא/זה" (whole words, up to five words after the keyword)
+    rf"(?:{_KEY_WORD}|{_WEAK_KEY_WORD})(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+{_CRED}", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
-# split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
+# split at _ - . so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
 # and neither is a camelCase name built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback).
-_KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")
+# "/" stays inside a segment (base64 keys contain it, review 4 R2) unless every part is a lowercase or camelCase word,
+# which is a path.
+_KEY_SEGMENT = re.compile(r"[A-Za-z0-9+/=]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
@@ -82,9 +88,13 @@ def _entropy(s: str) -> float:
     return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
 
 
+def _pathlike(m: str) -> bool:
+    return "/" in m and all(not p or p.islower() or p.isdigit() or _CAMEL.fullmatch(p) for p in m.split("/"))
+
+
 def _keylike(text: str) -> bool:
     return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
-               and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
+               and not _pathlike(m) and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
 
 
 def _base32(text: str) -> bool:

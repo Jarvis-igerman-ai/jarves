@@ -24,6 +24,11 @@ KEYS = [
     "the token for my work github account is abc12345",
     "my openai key is abc12345",
     "Remember aB3xY7qL9mN2pR5tV8wZ1kC4",                                # random mixed case, not camelCase words
+    # #1099 review 4: R1 a bare "key" with ":"/"=" and a credential-shaped value; R2 base64 with "/" in it
+    "my openai key: abc12345",
+    "wifi key = Kx7mP2q9",
+    "the tokens: 9xK2mQ7p",
+    "remember Zx9f/Q2LmB7v/T4kRw8YpN3sHd+",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -53,6 +58,11 @@ PLAIN = [
     "rename handleOAuth2CallbackResponse in the auth module",
     "call getUserPreferences2Async on start",
     "the key is under the mat",
+    # #1099 review 4: R4 a weak word (token/key) with ":" needs a credential-shaped value; R2 paths are not keys
+    "fix token refresh: done",
+    "tokens: 5 left",
+    "the key: under the mat",
+    "see core/src/jarves/hebrew2parts/voice3module for it",
 ]
 
 
@@ -91,3 +101,15 @@ def test_dev_task_naming_a_token_is_kept_but_one_carrying_a_key_is_refused(home)
         devmanager.suggest(st, "token refresh", "my token is Zx9fQ2LmB7vT4kRw8YpN3sHd")
     assert len(devmanager.listing(st)) == 1
     st.close()
+
+
+def test_goal_carrying_a_key_is_refused_and_stores_nothing(home):
+    """#1099 review R3: goals use the same gate; a goal naming a token is kept, one carrying a key is refused."""
+    from jarves import goals as goals_mod
+    g = goals_mod.Goals(open_db(home))
+    with pytest.raises(ValueError):
+        g.add("my token is Zx9fQ2LmB7vT4kRw8YpN3sHd")
+    with pytest.raises(ValueError):
+        g.add("rotate keys", "wifi key = Kx7mP2q9")
+    assert g.list() == []
+    assert g.add("fix token refresh expiry")["title"] == "fix token refresh expiry"
