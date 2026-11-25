@@ -236,6 +236,7 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     wt = project_root(home, pid) / "integration"
     br = integration_branch(pid)
     if (wt / ".git").exists():
+        _pin(wt, repo)
         return wt
     wt.parent.mkdir(parents=True, exist_ok=True)
     start = base or "HEAD"
@@ -244,6 +245,7 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
             git(repo, "worktree", "add", str(wt), br)
         else:
             git(repo, "worktree", "add", "-b", br, str(wt), start)
+    _pin(wt, repo)
     return wt
 
 
@@ -255,6 +257,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+    _pin(wt, repo)
     return wt, br
 
 
@@ -265,6 +268,7 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "--detach", str(wt), sha)
+    _pin(wt, repo)
     return wt
 
 
@@ -373,58 +377,113 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
 
 # (#1592) a check command and an agent run code from the worktree as the owner's user, and that code can write the
 # shared git dir, which the owner's own git reads (a planted filter or hook runs in the owner's checkout). No permission
-# rule stops executed code, so each run is guarded: these files are compared with a snapshot afterwards, a change is
-# restored and fails the run. Runs overlapping on one repository share the first run's snapshot, so a later run never
-# takes a planted file as its baseline. Not covered: a write during the run seen by git before the restore, other
-# files of the git dir (refs, objects), a second JARVES process. A config change the owner makes during a run is also
-# restored (and reported): the guard cannot tell who wrote it.
+# rule stops executed code, so each run is guarded: these entries are compared with a snapshot afterwards, a change is
+# restored and fails the run. The shared git dir of a JARVES worktree is pinned from the owner's repository when the
+# worktree is made, never read from the worktree's own (agent-writable) `.git` pointer, which is guarded too. Folders
+# (`hooks`, `info`, `worktrees/<n>`) must stay real folders: a symlink in their place is removed. Runs overlapping on
+# one repository share the first run's snapshot, so a later run never takes a planted file as its baseline. Not
+# covered: a write during the run seen by git before the restore, other files of the git dir (refs, objects), a second
+# JARVES process, a worktree made before this process started (its common dir comes from its pointer). A config change
+# the owner makes during a run is also restored (and reported): the guard cannot tell who wrote it.
 _GUARD: dict[str, list] = {}               # common dir -> [runs inside, {relative path: snapshot}]
 _GUARD_LOCK = threading.Lock()
+_PINNED: dict[str, Path] = {}              # worktree -> the shared git dir, read from the owner's repository
+_DIRS = ("hooks", "info", "worktrees")
+
+
+def _key(path: str | Path) -> str:
+    return os.path.normcase(os.path.realpath(str(path)))
+
+
+def _pin(wt: Path, repo: str | Path) -> None:
+    p = _run(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if p.returncode == 0 and p.stdout.strip():
+        _PINNED[_key(wt)] = Path(p.stdout.strip())
+
+
+def _real_dir(path: Path) -> bool:
+    return path.is_dir() and not path.is_symlink()
+
+
+def _is_dir_name(n: str) -> bool:
+    return n in _DIRS or (n.startswith("worktrees/") and n.count("/") == 1)
 
 
 def _guarded(common: Path) -> list[str]:
-    names = ["config", "config.worktree", "info/attributes"]
-    names += [f"worktrees/{d.name}/config.worktree" for d in sorted(common.glob("worktrees/*")) if d.is_dir()]
-    hooks = common / "hooks"
-    return names + ([f"hooks/{h.name}" for h in sorted(hooks.iterdir()) if not h.is_dir()] if hooks.is_dir() else [])
+    names = [*_DIRS, "config", "config.worktree", "info/attributes"]
+    if _real_dir(common / "worktrees"):
+        for d in sorted((common / "worktrees").iterdir()):
+            names += [f"worktrees/{d.name}/config.worktree"] if _real_dir(d) else [f"worktrees/{d.name}"]
+    if _real_dir(common / "hooks"):
+        names += [f"hooks/{h.name}" for h in sorted((common / "hooks").iterdir()) if not _real_dir(h)]
+    return names
 
 
 def _snap(path: Path) -> tuple | None:
     if path.is_symlink():
         return ("link", os.readlink(path))
+    if path.is_dir():
+        return ("dir",)
     try:
         return ("file", path.read_bytes(), path.stat().st_mode & 0o777)
     except FileNotFoundError:
         return None
-    except OSError as e:                     # e.g. a folder planted in its place: differs, so it is restored or listed
+    except OSError as e:
         return ("unreadable", type(e).__name__)
 
 
-def _restore(path: Path, snap: tuple | None) -> bool:
-    if snap is None or snap[0] == "link":   # a planted file goes; a link is never re-created by JARVES
+def _changed(n: str, cur: tuple | None, base: tuple | None) -> bool:
+    if _is_dir_name(n):                      # a real folder git made meanwhile (a new worktree) is fine
+        return cur != ("dir",) and cur != base
+    return cur != base or cur == ("dir",)    # a folder in place of a file is always a change
+
+
+def _restore(path: Path, base: tuple | None, folder: bool = False) -> bool:
+    """Put `base` back at `path`; False when its folder is gone (the worktree was removed meanwhile)."""
+    if base is not None and (base[0] == "unreadable" or (base[0] == "dir" and not folder)):
+        raise ValueError(f"its earlier state was not a readable file ({base[-1]})")
+    if not _real_dir(path.parent):
+        return False
+    if _real_dir(path):
+        shutil.rmtree(path)
+    if base is None or base[0] != "file":
         if path.is_symlink() or path.exists():
             path.unlink()
+        if base == ("dir",):
+            path.mkdir()
+        elif base is not None:
+            os.symlink(base[1], path)        # the owner's own link, e.g. hooks/pre-commit -> ../../scripts/x
         return True
-    if not path.parent.is_dir():             # the worktree was removed meanwhile: nothing left to restore
-        return False
     tmp = path.with_name(f".{path.name}.jarves-{os.getpid()}-{threading.get_ident()}.tmp")
-    tmp.write_bytes(snap[1])
-    os.chmod(tmp, snap[2])
+    tmp.write_bytes(base[1])
+    os.chmod(tmp, base[2])
     os.replace(tmp, path)
     return True
 
 
+def _put_back(path: Path, base: tuple | None, label: str, changed: list[str]) -> None:
+    try:
+        if _restore(path, base, _is_dir_name(label)):
+            changed.append(label)
+    except Exception as e:  # noqa: BLE001 - one failure never stops the other restores; it fails the run
+        changed.append(f"{label} (NOT restored: {e})")
+
+
 @contextmanager
 def shared_git_guard(wt: str | Path, changed: list[str]):
-    """Restore the shared git dir's config, attributes and hooks after the block; `changed` gets what was restored.
-    A folder that is not a git repository has nothing to guard. A file that cannot be restored is listed as such."""
-    try:
-        p = _run(wt, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    except (OSError, subprocess.SubprocessError):   # a missing folder or a hung git: nothing found to guard; a
-                                                    # repository whose git hangs also fails JARVES's own git calls
-        p = None
-    common = Path(p.stdout.strip()) if p and p.returncode == 0 and p.stdout.strip() else None
-    key = os.path.normcase(os.path.realpath(str(common))) if common else ""
+    """Restore the shared git dir's config, attributes, hooks and folders and the worktree's `.git` pointer after
+    the block; `changed` gets what was restored (or could not be). A folder that is not a git repository has nothing
+    to guard."""
+    common = _PINNED.get(_key(wt))
+    if common is None:
+        try:
+            p = _run(wt, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        except (OSError, subprocess.SubprocessError):   # a missing folder or a hung git: nothing found to guard; a
+            p = None                                    # repository whose git hangs also fails JARVES's own git calls
+        common = Path(p.stdout.strip()) if p and p.returncode == 0 and p.stdout.strip() else None
+    ptr = Path(wt) / ".git"
+    ptr_base = _snap(ptr) if common and not _real_dir(ptr) else None
+    key = _key(common) if common else ""
     if common:
         with _GUARD_LOCK:
             g = _GUARD.setdefault(key, [0, {}])
@@ -438,13 +497,11 @@ def shared_git_guard(wt: str | Path, changed: list[str]):
             with _GUARD_LOCK:
                 g = _GUARD[key]
                 try:
-                    for n in sorted(set(g[1]) | set(_guarded(common))):
-                        if _snap(common / n) != g[1].get(n):
-                            try:
-                                if _restore(common / n, g[1].get(n)):
-                                    changed.append(n)
-                            except OSError as e:   # still fails the run; the owner must look
-                                changed.append(f"{n} (NOT restored: {e})")
+                    if ptr_base is not None and _snap(ptr) != ptr_base:
+                        _put_back(ptr, ptr_base, ".git (worktree pointer)", changed)
+                    for n in dict.fromkeys([*_DIRS, *sorted(set(g[1]) | set(_guarded(common)))]):   # folders first
+                        if _changed(n, _snap(common / n), g[1].get(n)):
+                            _put_back(common / n, g[1].get(n), n, changed)
                 finally:
                     g[0] -= 1
                     if not g[0]:
