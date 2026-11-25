@@ -106,6 +106,13 @@ def _push_slug(url: str) -> str:
     return "/".join(re.split(r"[/:]", re.sub(r"(?:\.git)?/?\Z", "", url))[-2:]).lower()
 
 
+def pin_slug(path: str) -> str:
+    """#1595: the owner/repo `configure --github` pins: origin must be a URL push_branch accepts, parsed with the same
+    _push_slug that push_branch checks against (review R2: one parser), else ''."""
+    url = gitops.git(path, "config", "--get", "remote.origin.url", check=False).stdout.strip()
+    return _push_slug(url) if _PUSH_URL.match(url) else ""
+
+
 def push_branch(path: str, branch: str, repo: str) -> None:
     """A normal push of one branch to origin (never --force, never a tag, never the default branch).
     #1595: `repo` is the owner/repo the owner pinned (`jarvis project config --github`, stored as github_repo), never

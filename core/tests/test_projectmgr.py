@@ -1330,7 +1330,11 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     assert "pinned to o/r" in r["text"]
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
-    assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
+    assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r" and g["pinned"] == "o/r" and not g["drift"]
+    sh(repo, "git", "remote", "set-url", "origin", "https://github.com/evil/x.git")   # an agent moves origin
+    assert m.call("configure", project="demo", github="write", by="voice")["code"] == "CLI_ONLY"   # review R1
+    g = m.call("github", project="demo")
+    assert g["pinned"] == "o/r" and g["drift"] and "differs from the pinned repository o/r" in g["text"]  # R4
     assert m.call("configure", project="demo", github="off")["project"]["github_repo"] == ""
 
 

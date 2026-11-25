@@ -370,7 +370,7 @@ class Manager(StageEngine):
         if github is not None:
             if github not in forge.MODES:
                 return _res(False, "BAD_GITHUB", "github is off, read or write")
-            slug = forge.repo_slug(p["path"]) if github != "off" else ""
+            slug = forge.pin_slug(p["path"]) if github != "off" else ""
             if github != "off" and not slug:
                 return _res(False, "NOT_GITHUB", "this project's origin is not a github.com repository")
             f["github"], f["github_repo"] = github, slug          # #1595: the owner sees and pins this repository
@@ -386,7 +386,10 @@ class Manager(StageEngine):
         mode = p.get("github") or "off"
         where = (f" ({st['repo']})" if st["repo"] else " (no github.com remote)") if st.get("git", True) else \
             f"; {st.get('git_error')}"                          # #1722: the remote was not checked without git 2.31
-        return _res(True, "ok", f"{p['name']}: GitHub {mode}{where}", mode=mode, **st)
+        pinned = p.get("github_repo") or ""
+        drift = bool(pinned) and st.get("git", True) and st["repo"].lower() != pinned    # review R4: origin moved
+        where += f"; origin differs from the pinned repository {pinned}: pushes are refused" if drift else ""
+        return _res(True, "ok", f"{p['name']}: GitHub {mode}{where}", mode=mode, pinned=pinned, drift=drift, **st)
 
     def runners_info(self, **_) -> dict:
         rows = []

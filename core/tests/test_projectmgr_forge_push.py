@@ -3,6 +3,7 @@ names; and the project's GitHub status names the git 2.31 prerequisite. Each com
 plain `git push origin` with the same config runs the marker command on this platform."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -189,16 +190,18 @@ def test_the_shared_config_cannot_redirect_the_push_or_weaken_its_tls(tmp_path, 
         gitops.git(repo, "config", k, v)
     neg = _plain(repo, "push", "origin", BRANCH)
     assert neg.returncode == 0 and BRANCH in _branches(evil)                 # negative control: plain push redirected
+    shutil.rmtree(evil)                                                      # review R3: a clean evil remote again
+    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
     seen, real = [], gitops.git
 
     def git(cwd, *a, **kw):
-        if a[:1] == ("push",):
-            seen.append(real(cwd, "config", "--list", check=False).stdout.lower())
+        if a[:1] == ("push",):                                               # the push's own cwd, options and env
+            seen.append(real(cwd, "config", "--list", **{**kw, "check": False}).stdout.lower())
         return real(cwd, *a, **kw)
     monkeypatch.setattr(gitops, "git", git)
     forge.push_branch(str(repo), BRANCH, "o/r")
     assert _on(home) and seen and "127.0.0.1" not in seen[0] and "sslverify" not in seen[0]
-    assert evil.as_posix().lower() not in seen[0]
+    assert evil.as_posix().lower() not in seen[0] and BRANCH not in _branches(evil)
 
 
 @pytest.mark.parametrize("origin", ["https://github.com/someone-else/r.git", "git@github.com:o/other.git"])
@@ -217,6 +220,23 @@ def test_the_push_goes_only_to_the_repository_the_owner_pinned(tmp_path, home, o
 def test_every_accepted_form_of_the_pinned_repository_matches(url):
     """#1595: the pin compares owner/repo case-insensitively (as GitHub does), whatever accepted URL form is used."""
     assert forge._PUSH_URL.match(url) and forge._push_slug(url) == "o/r"
+
+
+@pytest.mark.parametrize("url", [URL, "https://GitHub.com/O/R", "ssh://git@github.com:22/o/r.git", "git@github.com:o/R/",
+                                 "ssh://git@github.com/o/r.git"])
+def test_the_pin_is_written_with_the_parser_that_checks_it(tmp_path, url):
+    """Review R2: configure pins forge.pin_slug(path), the same parser push_branch checks with, for every form."""
+    gitops.git(tmp_path, "init", "-q")
+    gitops.git(tmp_path, "config", "remote.origin.url", url)
+    assert forge.pin_slug(str(tmp_path)) == forge._push_slug(url) == "o/r"
+
+
+@pytest.mark.parametrize("url", ["https://github.com.evil.invalid/o/r", "ext::sh -c x", ""])
+def test_no_pin_for_an_origin_the_push_would_refuse(tmp_path, url):
+    gitops.git(tmp_path, "init", "-q")
+    if url:
+        gitops.git(tmp_path, "config", "remote.origin.url", url)
+    assert forge.pin_slug(str(tmp_path)) == ""
 
 
 def _branches(bare: Path) -> str:
