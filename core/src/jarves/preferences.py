@@ -14,7 +14,7 @@ import difflib
 import re
 import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import calm
 from . import features as feat
@@ -301,7 +301,14 @@ class IdArgs(BaseModel):
 
 
 class ConfirmArgs(IdArgs):
-    text: str                    # #1514: the exact wording the owner was shown; blank never matches a stored item
+    text: str                    # #1514: the exact wording the owner was shown
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:      # like the dashboard: a blank wording is refused, never an unguarded confirm
+        if not v.strip():
+            raise ValueError("the wording the owner was shown is required")
+        return v
 
 
 class EditArgs(BaseModel):
@@ -373,8 +380,8 @@ def make_skill(prefs: Preferences):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
             def confirm_meta(a: ConfirmArgs) -> dict:
-                # the popup shows WHAT would be remembered: the very words the confirm is bound to (#1514)
-                return {"details": {"preference": a.text[:MAX_TEXT]}} if prefs.get(a.id) else {}
+                r = prefs.get(a.id)           # the popup shows the STORED words; the confirm is bound to them (#1514)
+                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}} if r else {}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
@@ -453,7 +460,7 @@ def api_pref_op(ctx, m, body):
         return 400, {"error": str(e)}
     except KeyError:
         return 404, {"error": "no such preference"}
-    except PrefConflict:                          # #1514: edited meanwhile; nothing written, the page reloads
+    except PrefConflict:                          # #1514: edited meanwhile; nothing written, the page shows the error
         return 409, {"error": "the preference changed meanwhile: reload the page", "code": "PREF_CONFLICT"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
 

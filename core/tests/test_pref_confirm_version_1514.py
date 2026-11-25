@@ -73,7 +73,39 @@ async def test_voice_confirm_of_the_current_wording_confirms_and_a_missing_wordi
     reg.confirm = yes
     reg.register(prefs_mod.make_skill(p))
     reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
-    assert not (await reg.call("pref_confirm", {"id": pid}, origin="model")).ok          # no wording: invalid args
-    assert p.get(pid)["state"] == "proposed"
+    for bad in ({"id": pid}, {"id": pid, "text": ""}, {"id": pid, "text": "  "}):    # no or blank wording: refused
+        r = await reg.call("pref_confirm", bad, origin="model")
+        assert not r.ok and r.code == "TOOL_BAD_ARGS"                               # refused before any popup
+        assert p.get(pid)["state"] == "proposed"
     assert (await reg.call("pref_confirm", {"id": pid, "text": "prefers tea"}, origin="model")).ok
     assert p.for_prompt() == ["prefers tea"]
+
+
+async def test_voice_popup_shows_the_stored_words_not_the_model_text(home):
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest("prefers tea", "I prefer tea", "food", by="voice")["item"]["id"]
+    shown: list = []
+    reg = SkillRegistry()
+
+    async def no(prompt, **meta):
+        shown.append(meta["details"]["preference"])
+        return False
+    no.accepts_meta = True
+    reg.confirm = no
+    reg.register(prefs_mod.make_skill(p))
+    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
+    await reg.call("pref_confirm", {"id": pid, "text": "  PREFERS   Tea "}, origin="model")   # differs only in case/spacing
+    assert shown == ["prefers tea"] and p.get(pid)["state"] == "proposed"
+
+
+def test_dashboard_page_sends_the_shown_wording_and_has_hebrew_for_the_new_errors():
+    from pathlib import Path
+    import json
+    static = Path(prefs_mod.__file__).parent / "dashboard_static"
+    js = (static / "pillars.js").read_text(encoding="utf-8")
+    assert 'post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {}))' in js     # op() merges the extra fields
+    assert 'op(p.id, "confirm", { text: p.text })' in js                                      # the words the card shows
+    he = json.loads((static / "locales" / "parts" / "2026-11-25-intake-1514.json").read_text(encoding="utf-8"))["dict"]
+    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")
+    for msg in ("confirm needs the text you saw: reload the page", "the preference changed meanwhile: reload the page"):
+        assert f'"{msg}"' in src and he[msg].strip(), msg                 # the exact server error has a Hebrew form
