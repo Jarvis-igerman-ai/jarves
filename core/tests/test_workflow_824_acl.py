@@ -77,3 +77,17 @@ def test_missing_sessions_file_is_not_tightened(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_TIGHTENED", set())
     assert server.load_sessions(tmp_path) == {}
     assert seen == []
+
+
+def test_failed_tighten_is_not_retried_until_next_start(monkeypatch, tmp_path):
+    """Review R2 (JAR-835): once per process per path; a failure waits for the next process start."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or False)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    server.load_sessions(tmp_path)
+    server.load_sessions(tmp_path)
+    assert seen == [tmp_path / "sessions.json"]
+    monkeypatch.setattr(server, "_TIGHTENED", set())  # a new process
+    server.load_sessions(tmp_path)
+    assert seen == [tmp_path / "sessions.json"] * 2

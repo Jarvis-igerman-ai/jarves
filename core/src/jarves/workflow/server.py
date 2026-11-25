@@ -73,7 +73,10 @@ _TIGHTENED: set[str] = set()
 
 
 def _tighten_once(path: Path) -> None:
-    """Fix an existing file once per process (idempotent)."""
+    """Fix an existing file once per process (idempotent), keyed by its path.
+
+    The path is marked before icacls runs, so a failure is not retried in the same process: it is logged
+    by owner_only_file and retried on the next start (access.token and, since JAR-835, sessions.json)."""
     key = str(path)
     if key not in _TIGHTENED:
         _TIGHTENED.add(key)
