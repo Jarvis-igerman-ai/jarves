@@ -24,7 +24,7 @@
     earlier: n => `Earlier sessions: ${n}`, moreTeam: n => `${n} more in the team list. `, archived: n => `${n} archived.`,
     offline: "The worker disconnected mid-task", stalled: "The worker stalled without progress", twice: "Stalled twice; needs a decision",
     refused: "Autopilot could not start a worker", noReason: "No reason recorded", since: a => `since ${a}`,
-    hint: "The tag shows who can unblock it.", moreBlocked: n => `${n} more in the plan`, noBlocked: "Nothing is stuck.",
+    hint: "The tag shows who can unblock it.", dead: n => `Dead blocked: ${n}, closable (jarvis workflow close-dead)`, moreBlocked: n => `${n} more in the plan`, noBlocked: "Nothing is stuck.",
     bar: r => `${r.version}: ${r.merged} merged, ${r.verified} verified, ${r.shipped} shipped of ${r.total} required. Open in the plan`,
     merged: "merged", verified: "verified", shipped: "shipped", of: n => `of ${n}`, who: unblockersEn,
     overflow: n => `${n} more`, foldSum: r => `${r.version}: ${r.merged} of ${r.total} merged`,
@@ -39,7 +39,7 @@
     earlier: n => `סשנים קודמים: ${n}`, moreTeam: n => `ועוד ${n} ברשימת הצוות. `, archived: n => `${n} בארכיון.`,
     offline: "העובד התנתק באמצע העבודה", stalled: "העובד נתקע בלי התקדמות", twice: "נתקע פעמיים; צריך החלטה",
     refused: "המנוע האוטומטי לא הצליח להתחיל עובד", noReason: "לא נרשמה סיבה", since: a => `מאז ${a}`,
-    hint: "התג מראה מי יכול לשחרר.", moreBlocked: n => `ועוד ${n} בתוכנית`, noBlocked: "שום דבר לא תקוע.",
+    hint: "התג מראה מי יכול לשחרר.", dead: n => `חסומות מתות: ${n}, ניתנות לסגירה (jarvis workflow close-dead)`, moreBlocked: n => `ועוד ${n} בתוכנית`, noBlocked: "שום דבר לא תקוע.",
     bar: r => `${r.version}: ${r.merged} מוזגו, ${r.verified} נבדקו, ${r.shipped} שוחררו מתוך ${r.total} חובה. פתח בתוכנית`,
     merged: "מוזגו", verified: "נבדקו", shipped: "שוחררו", of: n => `מתוך ${n}`, who: unblockers,
     overflow: n => `עוד ${n}`, foldSum: r => `מוזגו ${r.merged} מתוך ${r.total} · ${r.version}`,
@@ -167,7 +167,7 @@
         + `<span class="today-row-main"><span class="today-row-title" dir="auto">${esc(task.title)}</span><span class="today-row-meta"><span>${why}</span>${since}${task.version ? `<span dir="ltr">${esc(task.version)}</span>` : ""}</span></span></button></li>`;
     }).join("");
     const more = list.length > 6 ? `<a class="text-link today-more" href="#roadmap">${esc(T.moreBlocked(list.length - 6))} <span aria-hidden="true" class="dir-arrow">←</span></a>` : "";
-    put("#today-blocked", list.length ? `<p class="today-hint">${esc(T.hint)}</p><ul class="today-list">${rows}</ul>${more}` : `<p class="today-empty"><span class="status-dot good" aria-hidden="true"></span>${esc(T.noBlocked)}</p>`);
+    put("#today-blocked", list.length ? `<p class="today-hint">${esc(T.hint)}</p>${(data.dead_blocked || {}).closable ? `<p class="today-hint">${esc(T.dead(data.dead_blocked.closable))}</p>` : ""}<ul class="today-list">${rows}</ul>${more}` : `<p class="today-empty"><span class="status-dot good" aria-hidden="true"></span>${esc(T.noBlocked)}</p>`);
   }
 
   function roadmap(data) {

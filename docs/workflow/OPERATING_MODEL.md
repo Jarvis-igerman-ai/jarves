@@ -155,6 +155,16 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
 No close/reopen, merge-main push, force on main, check bypass or blind rerun;
 a test that fails then passes is quarantined with a `showstopper` issue.
 
+## Cleanup steward
+
+Blocked review/steward tasks whose PR is merged or closed can never run. `workflow close-dead`
+(dry run, no network, uses the stored GitHub sync) reports them; the dashboard shows "dead blocked: N,
+closable". `close-dead --apply` is a manual manager action: at most 25 per run, state `cancelled` with a
+note and a ledger event, never verified or delivered. It closes nothing that is not provably dead (V5-V7,
+owner questions, live owners, dependencies, recorded evidence or delivery and a malformed sync are skipped).
+PROPOSED, NOT ACTIVE (owner approval UNVERIFIED): a standing Haiku cleanup agent that runs it and does not
+count against the bug/feature worker limit. Until the owner approves, worker accounting is unchanged.
+
 ## Tier R flow
 
 PROPOSED, NOT ACTIVE (owner approval UNVERIFIED): see [TIER_R_FLOW_PROPOSAL.md](TIER_R_FLOW_PROPOSAL.md). The steward never merges Tier R PRs.
