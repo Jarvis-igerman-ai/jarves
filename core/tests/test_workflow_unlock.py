@@ -203,6 +203,26 @@ class UnlockTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.wrong_try(shown), (200, None))
 
+    def test_restored_session_keeps_its_tries_after_a_later_login_1416(self):
+        sid = self.login()                                             # the owner's window, stored for a restart
+        self.server.shutdown()
+        self.thread.join(5)
+        self.server.server_close()
+        self.server = Server(self.home, 0)                             # restart: the window is restored, login 0
+        self.store = self.server.store
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        restored = f"{self.server.cookie}={sid}"
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.cookie = ""
+        self.login()                                                   # a fresh login after the restart
+        self.assertEqual(self.wrong_try(wrong), (403, None))           # its wrong try starts the rule
+        self.cookie = restored
+        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, None)] * 2)   # counted, not too new
+        self.assertEqual(self.server.unlock_wrong.by_session.get(sid), 2)
+        self.assertEqual(self.wrong_try(shown), (200, None))
+
     def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
