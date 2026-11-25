@@ -694,6 +694,8 @@ class SkillRegistry:
                 return ToolResult(prev.ok, prev.message, {**prev.data, "cached": "same result as a moment ago; "
                                   "do not call this tool again with the same arguments"}, code=prev.code)
         asked0 = self.asks
+        # Same-instance contract: _authorize and _run get this one `args` object (approval_meta may stash private
+        # state on it, e.g. preferences ConfirmArgs._shown, #1514). Never copy or re-validate args between them.
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
