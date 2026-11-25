@@ -127,6 +127,8 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     now = time.time() if now is None else now
     path = Path(home) / "sessions.json"
     try:
+        if path.is_symlink():  # never rewrite (or trust) whatever a link points at (JAR-858 review R2)
+            return {}
         if path.is_file():  # a file written before #824 keeps the folder ACL until tightened (JAR-858)
             _tighten_once(path)
         raw = json.loads(path.read_text(encoding="utf-8"))

@@ -69,6 +69,7 @@ def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monke
     home.mkdir()
     old = home / "sessions.json"
     old.write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
-    assert any(inherited for _, inherited in _acl(old)[1])  # precondition: the pre-#824 state
+    if not any(inherited for _, inherited in _acl(old)[1]):  # the pre-#824 state; a hardened TEMP lacks it
+        pytest.skip("precondition: no inherited ACEs on tmp_path")
     assert server.load_sessions(home) == {}
     _assert_owner_only(old)

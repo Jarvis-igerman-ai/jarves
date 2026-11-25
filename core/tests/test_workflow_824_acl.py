@@ -4,6 +4,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from jarves.workflow import server
 
 
@@ -77,4 +79,19 @@ def test_missing_sessions_file_is_not_tightened(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
     monkeypatch.setattr(server, "_TIGHTENED", set())
     assert server.load_sessions(tmp_path) == {}
+    assert seen == []
+
+
+def test_symlinked_sessions_file_is_not_tightened(monkeypatch, tmp_path):
+    """Review R2: a linked sessions.json is neither tightened (that would rewrite the target's ACL) nor read."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"version": 1, "sessions": {"%s": 150.0}}' % ("a" * 64), encoding="utf-8")
+    try:
+        (tmp_path / "sessions.json").symlink_to(target)
+    except OSError:  # Windows without the symlink privilege
+        pytest.skip("cannot create a symlink here")
+    assert server.load_sessions(tmp_path, now=100.0) == {}
     assert seen == []
