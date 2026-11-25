@@ -22,7 +22,21 @@ concurrency:
   group: jarves-release
   cancel-in-progress: false
 jobs:
+  signers-fallback:
+    # #605: no environment here, so vars.RELEASE_ALLOWED_SIGNERS can only be a repository/organization variable (the
+    # fallback `stable` would silently read when the stable-release one is missing); the gate trusts only "false"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          FALLBACK: ${{ vars.RELEASE_ALLOWED_SIGNERS }}
+        run: if [ -n "$FALLBACK" ]; then echo present=true; else echo present=false; fi >> "$GITHUB_OUTPUT"
   stable:
+    needs: signers-fallback
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # #544: only a real publish (a tag push, or a dispatch on a tag ref with dry_run unticked) runs inside the protected
@@ -95,6 +109,10 @@ jobs:
           fi
       - name: Release gate (sign-off, SHA, live P0/P1 issues)
         working-directory: core
+        env:
+          # #605: the owner's ssh allowed_signers lines (stable-release environment variable); the gate verifies the tag with them
+          JARVES_ALLOWED_SIGNERS: ${{ github.ref_type == 'tag' && vars.RELEASE_ALLOWED_SIGNERS || '' }}
+          JARVES_SIGNERS_FALLBACK: ${{ needs.signers-fallback.outputs.present }}
         run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist   # --sha = tag commit, --verified-sha = tested commit (ancestor, docs-only change allowed)
       - name: Plan (dry run)
         if: ${{ env.DRY_RUN == 'true' }}

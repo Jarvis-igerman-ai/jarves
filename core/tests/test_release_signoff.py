@@ -465,3 +465,72 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
     env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
     assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
     assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf
+
+
+def _sh(cwd, *cmd, data=None):
+    import subprocess
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(cwd), "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+    return subprocess.run(cmd, cwd=cwd, env=env, input=data, capture_output=True, check=True).stdout.decode().strip()
+
+
+def _signed_tag_repo(tmp_path, rows):
+    """A real repo with two commits; v4.1.0 = annotated tag on HEAD, SSH-signed by the owner key with `rows`."""
+    r = tmp_path / "repo"
+    r.mkdir()
+    for who in ("owner", "stranger"):
+        _sh(tmp_path, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", who, "-f", str(tmp_path / who))
+    _sh(r, "git", "init", "-q")
+    for k, v in (("user.name", "o"), ("user.email", "o@x"), ("gpg.format", "ssh"), ("user.signingkey", str(tmp_path / "owner"))):
+        _sh(r, "git", "config", k, v)
+    _sh(r, "git", "commit", "-q", "--allow-empty", "-m", "one")
+    _sh(r, "git", "commit", "-q", "--allow-empty", "-m", "two")
+    _sh(r, "git", "tag", "-s", "v4.1.0", "-m", f"Rows hash: {rows}")
+    pub = (tmp_path / "owner.pub").read_text().split()
+    return r, f'owner namespaces="git" {pub[0]} {pub[1]}', _sh(r, "git", "rev-parse", "HEAD")
+
+
+@pytest.mark.linux_only
+def test_605_rows_hash_counts_only_in_a_tag_signed_by_the_owner_key(tmp_path):
+    """#605: the out-of-band rows hash is authentic only in a tag SSH-signed by a key on the owner's allowed-signers list."""
+    rows = "b" * 64
+    r, signers, head = _signed_tag_repo(tmp_path, rows)
+    check = lambda tag="v4.1.0", sha=head, h=rows, s=signers: " ".join(gate.tag_signature_problems(r, tag, sha, s, h))  # noqa: E731
+    assert check() == ""
+    assert "differs" in check(h="c" * 64)                                       # the signed hash is not the given one
+    assert "points at" in check(sha=_sh(r, "git", "rev-parse", "HEAD~1"))       # signed tag on another commit
+    pub = (tmp_path / "stranger.pub").read_text().split()
+    assert "not signed by the owner" in check(s=f'owner namespaces="git" {pub[0]} {pub[1]}')   # unlisted key
+    _sh(r, "git", "tag", "v4.1.1")                                              # lightweight: nothing signed
+    assert "not an owner-signed annotated tag" in check(tag="v4.1.1")
+    _sh(r, "git", "config", "user.signingkey", str(tmp_path / "stranger"))
+    _sh(r, "git", "tag", "-s", "v4.1.2", "-m", f"Rows hash: {rows}")            # signed, but by a stranger key
+    assert "not signed by the owner" in check(tag="v4.1.2")
+    body = _sh(r, "git", "cat-file", "tag", "v4.1.0").replace("v4.1.0", "v4.1.3") + f"\nRows hash: {'c' * 64}\n"
+    _sh(r, "git", "update-ref", "refs/tags/v4.1.3", _sh(r, "git", "hash-object", "-t", "tag", "-w", "--stdin",
+                                                        data=body.encode()))    # text appended after the signature
+    assert "not an owner-signed annotated tag" in check(tag="v4.1.3", h="c" * 64)
+    _sh(r, "git", "update-ref", "refs/tags/v4.1.4", _sh(r, "git", "rev-parse", "refs/tags/v4.1.0"))
+    assert "named 'v4.1.0'" in check(tag="v4.1.4")                              # owner-signed object under another name
+
+    def no_tool(cmd, **k):
+        raise FileNotFoundError(cmd[0])
+    assert "cannot verify the signature" in " ".join(gate.tag_signature_problems(r, "v4.1.0", head, signers, rows, no_tool))
+
+
+def test_605_real_publish_needs_the_environment_signers_list(tmp_path, monkeypatch, capsys):
+    """#605: a real publish refuses without the stable-release signers list, or when a repo/org fallback may exist."""
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
+    monkeypatch.setattr(gate, "run_gate", lambda **k: [])
+    called = []
+    monkeypatch.setattr(gate, "tag_signature_problems", lambda *a: called.append(a) or [])
+    args = ["--tag", "v4.1.0", "--sha", SHA, "--repo-root", str(tmp_path), "--expect-rows-hash", "b" * 64]
+    for signers, fallback in (("", "false"), ("k", "true"), ("k", "")):
+        monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", signers)
+        monkeypatch.setenv("JARVES_SIGNERS_FALLBACK", fallback)
+        assert gate.main(args + ["--require-rows-hash"]) == 1 and "signature cannot be verified" in capsys.readouterr().out
+        assert gate.main(args) == 0 and "tag signature not checked" in capsys.readouterr().out   # a dry run: note only
+    monkeypatch.setenv("JARVES_SIGNERS_FALLBACK", "false")
+    assert gate.main(args + ["--require-rows-hash"]) == 0 and called[-1][1:] == ("v4.1.0", SHA, "k", "b" * 64)
+    wf = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "JARVES_SIGNERS_FALLBACK: ${{ needs.signers-fallback.outputs.present }}" in wf and "permissions: {}" in wf
