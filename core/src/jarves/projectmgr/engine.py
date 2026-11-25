@@ -60,6 +60,7 @@ class StageEngine:
     def _execute(self, pid: int, tid: int, cancel: threading.Event) -> None:
         p = self.db.project(pid)
         try:
+            gitops.register_project(self.home, p["id"], p["path"])      # #1599: task folders' owner repository
             self._drive(p, self.db.task(tid), cancel)
         except Exception as e:                                     # a task thread never dies silently
             logs.error("projects", "TASK_CRASHED", "task pipeline crashed", **logs.error_fields(e))

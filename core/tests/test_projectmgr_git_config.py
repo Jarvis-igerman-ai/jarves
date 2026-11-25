@@ -390,7 +390,7 @@ def test_a_task_folder_is_removed_with_its_jarves_link(tmp_path):
     """#1599: removing a task folder also drops JARVES's link file and the owner repository's worktree entry."""
     repo, _home, wt = _task(tmp_path)
     gitops.remove_worktree(str(repo), wt, gitops.task_branch(1, 1, 1))
-    assert not wt.exists() and not gitops.task_link(wt).exists()
+    assert not wt.exists() and gitops._key(wt) not in gitops._ENTRIES
     assert str(wt) not in gitops.git(repo, "worktree", "list").stdout
 
 
@@ -416,6 +416,51 @@ def test_a_folder_git_replaced_by_a_link_to_the_owner_repository_is_refused(tmp_
     config again; JARVES then refuses to run git in that folder."""
     repo, _home, wt = _task(tmp_path)
     gitops._rmtree(wt / ".git")
-    (wt / ".git").write_text(f"gitdir: {gitops.task_link(wt).read_text(encoding='utf-8')}\n", encoding="utf-8")
-    with pytest.raises(gitops.GitError, match="replaced by a link"):
+    (wt / ".git").write_text(f"gitdir: {gitops._ENTRIES[gitops._key(wt)]}\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="replaced .git"):
         gitops.commit_all(wt, "jarves")
+
+
+def test_a_pointer_planted_next_to_the_folder_never_redirects_jarves_git(tmp_path):
+    """#1599 review R1: JARVES finds a task folder's entry from the owner repository it recorded, never from a file
+    the agent can write. A planted `.t1-a1.gitlink` naming the agent's own repository changes nothing."""
+    repo, _home, wt = _task(tmp_path)
+    evil = wt.parent / "evil"
+    subprocess.run(["git", "init", "-q", str(evil)], check=True)
+    (wt.parent / f".{wt.name}.gitlink").write_text(str(evil / ".git"), encoding="utf-8")
+    getattr(gitops, "_ENTRIES", {}).clear()                  # as after a restart: found again from the owner side
+    (wt / "f.txt").write_text("agent\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "jarves")
+    br = gitops.task_branch(1, 1, 1)
+    assert gitops.git(repo, "show", f"{br}:f.txt").stdout == "agent\n"
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=evil, capture_output=True).returncode != 0
+
+
+def test_the_private_git_has_no_hard_links_into_the_owner_objects(tmp_path):
+    """#1599 review R2: a local clone hard-links the owner's object files by default; writing them through the link
+    would change the owner's repository. The copy's files each have one link."""
+    _repo, _home, wt = _task(tmp_path)
+    files = [f for f in (wt / ".git" / "objects").rglob("*") if f.is_file()]
+    assert files and all(f.stat().st_nlink == 1 for f in files)
+
+
+def test_a_failed_git_swap_puts_the_link_back(tmp_path, monkeypatch):
+    """#1599 review R5: if moving the private `.git` into the folder fails, the folder keeps its old link (it is
+    refused, not left without a `.git`), and a later adoption still works."""
+    repo, home = _repo(tmp_path), tmp_path / "jhome"
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, br = gitops.project_root(home, 1) / "wt" / "t1-a1", gitops.task_branch(1, 1, 1)
+    gitops.git(repo, "worktree", "add", "-q", "-b", br, str(wt), gitops.integration_branch(1))
+    real = gitops.os.replace
+
+    def fail_the_swap(src, dst):
+        if str(src).endswith(".clone/.git"):
+            raise OSError("locked")
+        return real(src, dst)
+    monkeypatch.setattr(gitops.os, "replace", fail_the_swap)
+    with pytest.raises(gitops.GitError, match="could not give it its own .git"):
+        gitops.adopt_task_folder(str(repo), wt, br)
+    assert (wt / ".git").read_text(encoding="utf-8").startswith("gitdir:")
+    monkeypatch.setattr(gitops.os, "replace", real)
+    gitops.adopt_task_folder(str(repo), wt, br)
+    assert (wt / ".git").is_dir() and gitops.git(wt, "status", "--porcelain").returncode == 0

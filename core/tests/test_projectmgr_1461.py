@@ -11,9 +11,11 @@ from jarves.projectmgr import engine, gitops
 
 GIT = ("git", "-c", "user.name=s", "-c", "user.email=s@s")
 # #1599: the folder's own `.git` is a private copy, so the move goes through the owner repository's entry (a process
-# that knows it), read from JARVES's pointer next to the folder
-COMMIT_EVIL = ("import os, subprocess as s; d = os.getcwd(); "
-               "g = open(os.path.join(os.path.dirname(d), '.' + os.path.basename(d) + '.gitlink')).read().strip(); "
+# that finds it: the owner's worktrees/<id> whose gitdir names this folder)
+COMMIT_EVIL = ("import glob, os, subprocess as s; d = os.getcwd(); "
+               "w = os.path.dirname(open(os.path.join(d, '..', '..', 'integration', '.git')).read()[7:].strip()); "
+               "g = [os.path.dirname(f) for f in glob.glob(os.path.join(w, '*', 'gitdir')) "
+               "if os.path.realpath(open(f).read().strip()) == os.path.realpath(os.path.join(d, '.git'))][0]; "
                "open('a.txt','w').write('evil'); "
                f"s.run({list(GIT)!r} + ['commit', '-qam', 'evil', '--no-verify'], check=True, "
                "env=dict(os.environ, GIT_DIR=g, GIT_WORK_TREE=d))")
