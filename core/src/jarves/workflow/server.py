@@ -114,6 +114,7 @@ class UnlockWrong:
     salt: str = ""
     total: int = 0
     by_session: dict[str, int] = field(default_factory=dict)
+    first_login: int = 0  # #1416: login number when the first wrong try came; later logins cannot guess this code
 
 
 def session_key(token: str, session: str) -> str:
@@ -176,6 +177,9 @@ class Server(ThreadingHTTPServer):
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
         # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
         self.unlock_wrong = UnlockWrong()
+        # #1416: login number per live session (a counter, not a clock). Sessions restored after a restart count as 0.
+        self.logins = 0
+        self.login_no: dict[str, int] = {}
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -503,7 +507,16 @@ class Handler(BaseHTTPRequestHandler):
                                  "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
                                  "reason": "session_exhausted"})
                 return
+            if wrong.total and self.server.login_no.get(session, 0) > wrong.first_login:
+                # #1416: a login made after a wrong try cannot add tries, so 3 + 2 from a second login no longer
+                # cancels the owner's code. Windows open before the first wrong try keep their tries.
+                self._json(403, {"error": "this window opened after a wrong code; use the code in a window opened "
+                                 "earlier, or run 'jarvis workflow unlock' in your own terminal for a new code",
+                                 "locked": True, "reason": "session_too_new"})
+                return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+                if not wrong.total:
+                    wrong.first_login = self.server.logins
                 wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
                 wrong.total += 1
                 if wrong.total >= UNLOCK_WRONG_TOTAL:
@@ -543,6 +556,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
+            self.server.logins += 1
+            self.server.login_no = {s: n for s, n in self.server.login_no.items() if s in self.server.sessions}
+            self.server.login_no[session] = self.server.logins
             self.server.persist_sessions(now)
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 

@@ -169,25 +169,52 @@ class UnlockTests(unittest.TestCase):
     def test_one_session_cannot_cancel_the_owner_code_1265(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # the owner's own window, already open
+        owner = self.cookie
+        self.cookie = ""
         self.login()                                                   # the read-only token holder's one window
         results = [self.wrong_try(wrong) for _ in range(6)]
         self.assertEqual(results, [(403, None)] * 3 + [(403, "session_exhausted")] * 3)
         self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))  # no 4th guess, even a right one
         self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])  # names both ways out
         self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives
-        self.cookie = ""
-        self.login()                                                   # the owner's own window
+        self.cookie = owner                                            # #1416: a window opened before the wrong tries
         self.server.unlock_attempts.clear()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_login_after_a_wrong_try_cannot_spend_the_shared_tries_1416(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # the owner's window, open before the code
+        owner = self.cookie
+        self.cookie = ""
+        self.login()                                                   # token holder's window A
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
+        self.cookie = ""
+        self.login()                                                   # log in again for a fresh window B
+        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, "session_too_new")] * 2)
+        self.assertEqual(self.wrong_try(shown), (403, "session_too_new"))   # no guess at all, even a right one
+        self.assertEqual(self.server.unlock_wrong.total, 3)            # B's refusals use none of the shared tries
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives 3 + 2
+        self.cookie = owner
+        self.assertEqual(self.wrong_try(shown), (200, None))
+        shown = unlock.issue(self.home)                                # a new code: B may guess it
+        self.cookie = ""
+        self.login()
+        self.assertEqual(self.wrong_try(shown), (200, None))
 
     def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
-        for i in range(5):                                             # new sessions give no extra guesses past 5
+        windows = []
+        for _ in range(2):                                             # windows open before the first wrong try
+            self.cookie = ""
+            self.login()
+            windows.append(self.cookie)
+        for i in range(5):                                             # many sessions give no extra guesses past 5
             if i % 3 == 0:
-                self.cookie = ""
-                self.login()
+                self.cookie = windows[i // 3]
             statuses.append(self.wrong_try(wrong)[0])
             self.assertEqual((self.home / unlock.FILE).exists(), i < 4, i)
             if i == 2:
