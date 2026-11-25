@@ -24,13 +24,15 @@ def home(tmp_path, monkeypatch):
     bare = tmp_path / "remote" / "r.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
     (h / ".gitconfig").write_text(f"[user]\n\tname = O\n\temail = o@example.invalid\n[protocol \"ext\"]\n\tallow = "
-                                  f"always\n[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
+                                  f"always\n[protocol \"https\"]\n\tallow = never\n[url \"{bare.as_posix()}\"]\n\tinsteadOf = {URL}\n", encoding="utf-8")
     for k in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(k, str(h))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
-    real = forge._check_push_target         # #1748: only this harness rewrite to the local bare repository passes
+    # #1748: only this harness rewrite to the local bare repository passes; the unwrapped check refuses the bare
+    # path (test_the_unwrapped_check_refuses_the_harness_bare_repository). R1: https is blocked (no network).
+    real = forge._check_push_target
     monkeypatch.setattr(forge, "_check_push_target",
                         lambda url, got: real(url, [URL if g == bare.as_posix() else g for g in got]))
     return bare
@@ -222,6 +224,8 @@ def test_a_global_pushurl_for_the_origin_url_is_not_used(tmp_path, home):
 
 
 @pytest.mark.parametrize("got,ok", [(["git@github.com:o/r.git"], True), (["https://github.com/O/R"], True),
+                                    (["ssh://git@github.com/o/r.git"], True), (["ssh://git@github.com:22/o/r"], True),
+                                    (["ssh://git@github.com:22/22/o"], False),
                                     (["https://github.com/o/other.git"], False), ([], False),
                                     ([URL, "git@github.com:o/r.git"], False), (["file:///tmp/r.git"], False)])
 def test_check_push_target(got, ok):
@@ -229,5 +233,18 @@ def test_check_push_target(got, ok):
     if ok:
         forge._check_push_target(URL, got)
     else:
-        with pytest.raises(forge.ForgeError, match="rewrites"):
+        with pytest.raises(forge.ForgeError, match="another target or an unsupported URL form"):
             forge._check_push_target(URL, got)
+
+
+def test_the_unwrapped_check_refuses_the_harness_bare_repository(tmp_path):
+    """Review R4: the `home` fixture's wrapper is the only reason the local bare repository passes."""
+    with pytest.raises(forge.ForgeError, match="rewrites"):
+        forge._check_push_target(URL, [(tmp_path / "remote" / "r.git").as_posix()])
+
+
+def test_the_harness_blocks_https(tmp_path, home):
+    """Review R1: a regression of the #1748 check fails locally instead of pushing to github.com from CI."""
+    repo, _, _ = _setup(tmp_path, "https://github.com/o/x.git")
+    neg = _plain(repo, "push", "origin", BRANCH)
+    assert neg.returncode != 0 and "not allowed" in neg.stderr, neg.stderr
