@@ -1,6 +1,7 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09 (findings authored); re-checked 2026-11-23; anchors re-checked (unchanged) 2026-11-25.
+Date: 2026-11-09 (findings authored); re-checked 2026-11-23; `projectmgr` anchors re-mapped in 01c25d9, then
+verified with no further change on 2026-11-25.
 **Pin: `file:line` references are as of `main` fae76ae; issue and PR states as read on GitHub on 2026-11-25.**
 Details: [Provenance](#provenance) at the end.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`. Also read,
@@ -87,10 +88,11 @@ check command.
 ## devstatus
 - **#7 P3**: `_token()` (`devstatus.py:57`) accepts `JARVES_UPDATE_TOKEN` for status reads, so read-only calls use an
   update-publish token with a broader scope. Prefer `GH_TOKEN`/`GITHUB_TOKEN` or a dedicated read token.
-  `follow_redirects=True` with a Bearer header (`devstatus.py:70`): httpx drops `Authorization` on cross-origin
-  redirects (library behaviour, UNVERIFIED against the pinned version). The cache file `dev_status_cache.json` keeps
-  API responses (issue/PR titles) unencrypted in the home folder. Requests are GET-only to a fixed host, with no SQL or
-  shell use.
+  The client sends a Bearer header with `follow_redirects=True` (`devstatus.py:70`); httpx is documented to drop
+  `Authorization` on cross-origin redirects, but this is UNVERIFIED against the pinned httpx version (that check is
+  part of finding #7 in [#1517](https://github.com/Jarvis-igerman-ai/jarves/issues/1517)). The cache file
+  `dev_status_cache.json` keeps API responses (issue/PR titles) unencrypted in the home folder. Requests are GET-only
+  to a fixed host, with no SQL or shell use.
 
 ## continuity
 - **#8 P3**: SQL is fully parameterised; `execute()` is idempotent per (device, cid). `add_turn`
@@ -140,8 +142,8 @@ guards, privacy at rest), and are small enough to fix in one change:
 - Line anchors in `projectmgr/{gitops,service,forge}.py` were moved to fae76ae on 2026-11-25 (commit 01c25d9 in
   #1708), because since 25f0a54 those files were changed by PRs #1718 (`gitops.py`, issue #1390), #1737
   (`service.py`, `forge.py`, issue #1722) and #1755 (`gitops.py`, `service.py`, issue #1407), per
-  `git log --first-parent 25f0a54..fae76ae` on them. Later on 2026-11-25 every `projectmgr` anchor was re-checked
-  (unchanged) against the cited code with `git show fae76ae:<file>`. Spot check, for example:
+  `git log --first-parent 25f0a54..fae76ae` on them. Later on 2026-11-25 every `projectmgr` anchor was verified
+  against the cited code with `git show fae76ae:<file>`, and none needed a further change. Spot check, for example:
   `git show fae76ae:core/src/jarves/projectmgr/gitops.py | sed -n 336,341p` (`is_protected`) and
   `git show fae76ae:core/src/jarves/projectmgr/service.py | sed -n 941p` (`HEAD...{sha}`).
 - The other cited files (`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`,
