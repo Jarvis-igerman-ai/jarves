@@ -1,20 +1,8 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09 (findings authored); re-checked 2026-11-23 on `main` 25f0a54 (line anchors, fix status of #1-#4,
-and the #1408 link protection in #1, the #1613 base32 rule in #4 and the #1578 `at_rest` change in #8); anchors
-re-mapped 2026-11-25.
-**Pin: every `file:line` reference below is as of `main` fae76ae; every issue and PR state is as read on GitHub on
-2026-11-25** (#1096, #1097, #1098 closed; #1099, #1254, #1517 open; #1108 closed unmerged). Anchors in
-`projectmgr/{gitops,service,forge}.py` were re-mapped: since 25f0a54 those files were changed only by PRs #1718
-(`gitops.py`, issue #1390), #1737 (`service.py`, `forge.py`, issue #1722) and #1755 (`gitops.py`, `service.py`, issue
-#1407), per `git log --first-parent 25f0a54..fae76ae` on them. On 2026-11-25 every `projectmgr` anchor below was
-checked against the cited code with `git show fae76ae:<file>`; spot check, for example:
-`git show fae76ae:core/src/jarves/projectmgr/gitops.py | sed -n 336,341p` (`is_protected`) and
-`git show fae76ae:core/src/jarves/projectmgr/service.py | sed -n 941p` (`HEAD...{sha}`). The other cited files
-(`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`, `projectmgr/{engine,runners}`) are byte-identical
-between 25f0a54 and fae76ae (`git diff --stat` empty), so their anchors were kept. The findings text was not
-otherwise re-checked against the newer code, except where a finding says so. "At review time" means only the old
-2026-11-09 behaviour, not a line number.
+Date: 2026-11-09 (findings authored); re-checked 2026-11-23; anchors re-checked (unchanged) 2026-11-25.
+**Pin: `file:line` references are as of `main` fae76ae; issue and PR states as read on GitHub on 2026-11-25.**
+Details: [Provenance](#provenance) at the end.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`. Also read,
 for #8 only: the `mobile.py` lines that #8 cites (484, 951, 978, 1019, 1133, 1157), not the rest of `mobile.py`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
@@ -145,3 +133,21 @@ guards, privacy at rest), and are small enough to fix in one change:
   [a #1517 comment](https://github.com/Jarvis-igerman-ai/jarves/issues/1517#issuecomment-7068781593). They are not in
   `docs/reviews/FINDINGS_LEDGER.md` because its rules keep `security`-labelled items as issues (like #206). #1254 now
   tracks only the council recovery.
+
+## Provenance
+- 2026-11-23 re-check, on `main` 25f0a54: line anchors, the fix status of #1-#4, and the #1408 link protection
+  (#1), the #1613 base32 rule (#4) and the #1578 `at_rest` change (#8).
+- Line anchors in `projectmgr/{gitops,service,forge}.py` were moved to fae76ae on 2026-11-25 (commit 01c25d9 in
+  #1708), because since 25f0a54 those files were changed by PRs #1718 (`gitops.py`, issue #1390), #1737
+  (`service.py`, `forge.py`, issue #1722) and #1755 (`gitops.py`, `service.py`, issue #1407), per
+  `git log --first-parent 25f0a54..fae76ae` on them. Later on 2026-11-25 every `projectmgr` anchor was re-checked
+  (unchanged) against the cited code with `git show fae76ae:<file>`. Spot check, for example:
+  `git show fae76ae:core/src/jarves/projectmgr/gitops.py | sed -n 336,341p` (`is_protected`) and
+  `git show fae76ae:core/src/jarves/projectmgr/service.py | sed -n 941p` (`HEAD...{sha}`).
+- The other cited files (`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`,
+  `projectmgr/{engine,runners}`) are byte-identical between 25f0a54 and fae76ae (`git diff --stat` empty), so their
+  anchors were kept.
+- Issue and PR states, read on GitHub on 2026-11-25: #1096, #1097, #1098 closed; #1099, #1254, #1517 open; #1108
+  closed unmerged.
+- The findings text was not otherwise re-checked against the newer code, except where a finding says so. "At review
+  time" means only the old 2026-11-09 behaviour, not a line number.
