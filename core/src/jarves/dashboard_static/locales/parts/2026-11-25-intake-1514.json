@@ -1,0 +1,7 @@
+{
+ "dict": {
+  "confirm needs the text you saw: reload the page": "האישור צריך את הנוסח שראית: יש לרענן את הדף",
+  "the preference changed meanwhile: reload the page": "ההעדפה השתנתה בינתיים: יש לרענן את הדף",
+  "the text is longer than any preference: reload the page": "הנוסח ארוך מכל העדפה שמורה: יש לרענן את הדף"
+ }
+}

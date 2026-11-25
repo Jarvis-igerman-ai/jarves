@@ -14,7 +14,7 @@ import difflib
 import re
 import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import calm
 from . import features as feat
@@ -300,6 +300,19 @@ class IdArgs(BaseModel):
     id: int = Field(..., ge=1)
 
 
+class ConfirmArgs(IdArgs):
+    text: str                    # #1514: the exact wording the owner was shown
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:      # like the dashboard: a blank wording is refused, never an unguarded confirm
+        if not v.strip():
+            raise ValueError("the wording the owner was shown is required")
+        if len(_clean(v, len(v))) > MAX_TEXT:  # longer than any stored item: refused, never cut to match a prefix
+            raise ValueError("the wording is longer than any preference")
+        return v
+
+
 class EditArgs(BaseModel):
     id: int = Field(..., ge=1)
     text: str = Field(..., min_length=3, max_length=MAX_TEXT)
@@ -326,10 +339,14 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "proposed, not saved yet: ask the owner whether to remember it", r)
                 return ToolResult(True, "already " + r["status"].split("_")[1], r)
 
-            async def confirm(a: IdArgs):
-                if not prefs.get(a.id):
+            async def confirm(a: ConfirmArgs):
+                try:                          # #1514: only the wording the popup showed; an edit meanwhile is a conflict
+                    r = prefs.confirm(a.id, by="voice", expect=a.text)
+                except KeyError:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
-                r = prefs.confirm(a.id, by="voice")
+                except PrefConflict:
+                    return ToolResult(False, "the wording changed meanwhile: read it to the owner again",
+                                      code="PREF_CONFLICT")
                 msg = "remembered"
                 if r["conflicts"]:
                     msg += "; it may conflict with: " + "; ".join(c["text"] for c in r["conflicts"])
@@ -364,20 +381,32 @@ def make_skill(prefs: Preferences):
             async def forget_impact(_a: IdArgs):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
-            def confirm_meta(a: IdArgs) -> dict:
-                r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
+            def confirm_check(a: ConfirmArgs) -> ToolResult | None:
+                # #1514: runs BEFORE the popup. The popup shows the stored words and the write is guarded by a.text, so
+                # both must be the same words now; otherwise the owner would approve A while the guard checks B.
+                r = prefs.get(a.id)
+                if not r:
+                    return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                if normalize(_clean(a.text, MAX_TEXT)) != r["norm"]:
+                    return ToolResult(False, "these are not the stored words: read them to the owner again",
+                                      code="PREF_CONFLICT")
+                return None
+
+            def confirm_meta(a: ConfirmArgs) -> dict:
+                r = prefs.get(a.id)           # the popup shows the STORED words; confirm_check bound a.text to them
                 return {"details": {"preference": str(r["text"])[:MAX_TEXT]}} if r else {}
 
             return [
-                Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
+                Tool("pref_suggest", "Owner STATED a lasting preference: propose, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
                      suggest, SuggestArgs, permission="action"),
-                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, IdArgs,
+                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'. text = exact stored words.",
+                     confirm, ConfirmArgs,
                      permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?",
-                     approval_meta=confirm_meta),
+                     approval_meta=confirm_meta, precheck=confirm_check),
                 Tool("pref_decline", "Owner said no: 'no do not keep that preference', 'לא תשמור את ההעדפה'.", decline, IdArgs, permission="action"),
-                Tool("pref_show", "Read learned preferences: 'what preferences did you learn', 'אילו העדפות למדת'.", show, NoArgs,
+                Tool("pref_show", "Learned preferences: 'what preferences did you learn', 'אילו העדפות למדת'.", show, NoArgs,
                      permission="read"),
-                Tool("pref_edit", "Reword a preference: 'change the preference', 'תשנה את ההעדפה'.", edit, EditArgs, permission="action"),
+                Tool("pref_edit", "Reword: 'change the preference', 'תשנה את ההעדפה'.", edit, EditArgs, permission="action"),
                 Tool("pref_forget", "Forget a preference (asks): 'forget that preference', 'תשכח את ההעדפה'.", forget, IdArgs,
                      permission="destructive", impact=forget_impact),
             ]
@@ -428,7 +457,12 @@ def api_pref_op(ctx, m, body):
         return 404, {"error": "no such preference"}
     try:
         if op == "confirm":
-            return 200, p.confirm(pid, by="dashboard")
+            seen = b.get("text")                  # #1514: confirm only the words the page showed
+            if not isinstance(seen, str) or not seen.strip():
+                return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
+            if len(_clean(seen, len(seen))) > MAX_TEXT:     # never cut to match a stored prefix the owner did not see
+                return 400, {"error": "the text is longer than any preference: reload the page", "code": "PREF_TEXT_TOO_LONG"}
+            return 200, p.confirm(pid, by="dashboard", expect=seen)
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":
@@ -439,6 +473,10 @@ def api_pref_op(ctx, m, body):
             return 200, {"ok": p.remove(pid, by="dashboard")}
     except ValueError as e:
         return 400, {"error": str(e)}
+    except KeyError:
+        return 404, {"error": "no such preference"}
+    except PrefConflict:                          # #1514: edited meanwhile; nothing written, the page shows the error
+        return 409, {"error": "the preference changed meanwhile: reload the page", "code": "PREF_CONFLICT"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
 
 
