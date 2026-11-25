@@ -72,3 +72,21 @@ async def test_user_origin_confirm_also_runs_the_approval_and_binds_its_words(ho
     r = await reg.call("pref_confirm", {"id": pid}, origin="user")
     assert asked[0]["details"]["preference"] == OLD and not r.ok and r.code == "PREF_CONFLICT"
     assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
+
+
+async def test_a_suggestion_longer_than_the_cap_is_stored_capped_and_both_confirms_succeed(home):
+    p = prefs_mod.Preferences(open_db(home))
+    long_text = "short answers " * 30                                  # 420 chars, over MAX_TEXT
+    pid = p.suggest(long_text, "I prefer short answers", "voice")["item"]["id"]
+    stored = p.get(pid)["text"]
+    assert len(stored) <= prefs_mod.MAX_TEXT
+    reg, asked = _registry(p)
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert r.ok and asked[0]["details"]["preference"] == stored and p.get(pid)["state"] == "confirmed"
+    pid2 = p.suggest("long " + long_text, "I prefer", "voice")["item"]["id"]
+    assert p.confirm(pid2, by="dashboard", expect=p.get(pid2)["text"])["item"]["state"] == "confirmed"
+
+
+def test_the_text_required_message_has_hebrew():
+    from jarves import locale_parts
+    assert "confirm needs the text you saw: reload the page" in locale_parts.catalog("he")["dict"]

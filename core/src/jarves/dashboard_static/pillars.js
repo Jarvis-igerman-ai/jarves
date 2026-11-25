@@ -95,9 +95,11 @@
   }
 
   // ------------------------------------------------------------- Learned preferences
+  let prefNotice = null;                   // #1514: why the page reloaded after a stale confirm, shown once
   async function pagePreferences() {
     const d = await api("/api/prefs");
     const msg = msgSpan();
+    if (prefNotice) { msg.textContent = prefNotice; prefNotice = null; }
     const op = (id, o, extra) => act(msg, () => post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {})));
     const text = el("input", { type: "text", dir: "auto", maxlength: "200", style: "min-width:260px;flex:1", "aria-label": tx("העדפה חדשה", "New preference"),
       placeholder: tx("העדפה שתרצה שאזכור", "A preference you want remembered") });
@@ -116,7 +118,10 @@
     const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
     // #1514: the confirm carries the words shown; if they changed meanwhile (409) the page reloads with the new words
     const confirm = (p) => () => act(msg, () => post("/api/prefs/op", { op: "confirm", id: p.id, text: p.text })
-      .catch((e) => { if (!e || e.code !== "PREF_CONFLICT") throw e; }));   // resolved: act() reloads the page
+      .catch((e) => {
+        if (!e || e.code !== "PREF_CONFLICT") throw e;
+        prefNotice = tx("הניסוח השתנה בינתיים: בדוק אותו שוב ואשר", "The wording changed meanwhile: check it again and confirm");
+      }));                                // resolved: act() reloads the page, which shows the notice
     const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), confirm(p), "primary"),
       btn(tx("עריכה", "Edit"), edit(p)), btn(tx("לא לזכור", "Do not remember"), () => op(p.id, "decline"))]));
     const items = d.items.map((p) => row(p, [btn(tx("עריכה", "Edit"), edit(p)),

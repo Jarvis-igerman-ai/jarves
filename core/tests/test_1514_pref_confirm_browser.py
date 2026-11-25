@@ -55,6 +55,7 @@ def test_confirm_posts_the_shown_words_and_a_conflict_reloads_the_new_words(brow
         p.get_by_role("button", name="Confirm, remember it").click(timeout=30000)
     assert json.loads(req.value.post_data) == {"op": "confirm", "id": 7, "text": OLD}
     p.get_by_text(NEW).wait_for(timeout=30000)          # reloaded with the new words, still to be confirmed
+    p.get_by_text("The wording changed meanwhile: check it again and confirm").wait_for(timeout=30000)
     assert p.get_by_text("Failed:").count() == 0 and p.get_by_role("button", name="Confirm, remember it").count() == 1
     assert errs == []
     ctx.close()
