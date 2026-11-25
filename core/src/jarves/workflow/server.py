@@ -125,8 +125,11 @@ def session_key(token: str, session: str) -> str:
 def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     """Unexpired stored session digests; a missing or damaged file means no stored sessions."""
     now = time.time() if now is None else now
+    path = Path(home) / "sessions.json"
     try:
-        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
+        if path.is_file():  # a file written before #824 keeps the folder ACL until tightened (JAR-858)
+            _tighten_once(path)
+        raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
             return {}
