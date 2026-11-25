@@ -1,15 +1,14 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09 (findings authored); re-checked 2026-11-23.
-**Pin: every `file:line` reference and every issue state below is as of `main` 25f0a54.** Each line anchor was
-re-read there with `git show 25f0a54:<file>`. Read the anchors at that commit, not at a newer main.
-Drift: by `main` fae76ae, `projectmgr/{gitops,forge,service,surfaces}.py` had changed (#1390, #1407, #1722), so
-anchors in those files may have moved; they were not re-mapped, and the findings were not re-checked against that code.
-So #5, #6, #11 and #12 (all citing `gitops.py`) need re-mapping against current main before anyone fixes them.
-The other cited files (`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`, `projectmgr/{engine,runners}`)
-are byte-identical between 25f0a54 and fae76ae (`git diff --stat` empty), so their anchors still hold there.
-"At review time" means only the old 2026-11-09 behaviour. It never refers to a line number.
-Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
+Date: 2026-11-09 (findings authored); re-checked 2026-11-23; anchors re-mapped 2026-11-25.
+**Pin: every `file:line` reference and every issue state below is as of `main` fae76ae.** Anchors in
+`projectmgr/{gitops,service,forge}.py` (changed since 25f0a54 by #1390, #1407, #1722) were re-mapped by reading the
+same code line with `git show fae76ae:<file>`. The other cited files (`goal_plans`, `continuity`, `devstatus`,
+`preferences`, `mobile`, `projectmgr/{engine,runners}`) are byte-identical between 25f0a54 and fae76ae
+(`git diff --stat` empty), so their anchors were kept. The findings text was not otherwise re-checked against the newer
+code, except where a finding says so. "At review time" means only the old 2026-11-09 behaviour, not a line number.
+Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`. Also read,
+for #8 only: the `mobile.py` lines that #8 cites (484, 951, 978, 1019, 1133, 1157), not the rest of `mobile.py`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
 Not read in full: `projectmgr/{engine,pipeline,surfaces,cards,debate,plan}.py`, and the route and auth layers that call
@@ -48,23 +47,24 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 - **#1 P1: `.github/` unprotected** (`PROTECTED`, `gitops.py:21`). At review time, `PROTECTED` did not list
   `.github/`, and `forge.push_branch` pushes `jarves/p<N>/...` branches. The impact is stated in #1096. **Fixed on
   main by #1101 (JAR-317)**: `.github/` was added, and `test_projectmgr_git.py` covers it. #1408 (JAR-600, issue #1381)
-  also counts a changed symlink or gitlink as protected (`link_files`, `gitops.py:186`). Remaining gap: #11.
-- **#2 P2: case-sensitive protection** (`gitops.py:216-221`). The check was a case-sensitive `startswith`, so on
+  also counts a changed symlink or gitlink as protected (`link_files`, `gitops.py:306`). Remaining gap: #11.
+- **#2 P2: case-sensitive protection** (`gitops.py:336-341`). The check was a case-sensitive `startswith`, so on
   Windows/macOS a change to `.CLAUDE/settings.json` reached the same directory without being flagged. **Fixed on main
   by #1101**: `is_protected()` casefolds the path and normalises `\` to `/`; #1351 (JAR-574) also refuses Windows 8.3
   short names (`CLAUDE~1/`). Remaining gap: #12 (only `PROTECTED_NAMES` match in any folder).
 - **#3 P2: stale PID kill** (startup loop in `_recover`, `service.py:97-103`). At review time, the stored `pid` of
   every `running/review` task got `taskkill /F /T` (or `killpg`) at startup; after a reboot that PID can belong to an
   unrelated process, and `/T` kills its whole tree. **Fixed on main by #1366 (JAR-575)**: `_kill_owned`
-  (`service.py:1299`) kills via `_kill_pid` (`service.py:1313`) only when the stored `pid_start` marker matches the
+  (`service.py:1317`) kills via `_kill_pid` (`service.py:1331`) only when the stored `pid_start` marker matches the
   live process, and fails closed otherwise.
-- **#5 P3: `remove_worktree`** (`gitops.py:154-156`) refuses only paths without a `projects` component, so a path
+- **#5 P3: `remove_worktree`** (`gitops.py:270-272`) refuses only paths without a `projects` component, so a path
   such as `C:\Users\x\projects\repo` would still reach `shutil.rmtree`. Current callers build paths under
   `<home>/projects`. Harden with `resolve()` + `is_relative_to(project_root)`.
-- **#6 P3: git ref arguments.** The `base`/`branch` strings reach `git diff {base}...HEAD` (`gitops.py:179`, `189`,
-  `195`), `git diff HEAD...{br}` (`service.py:926`), `git merge branch` (`gitops.py:238`) and `worktree add ... start`
-  (`gitops.py:127`, `129`, `140`). `start` is validated with `rev-parse --verify` first (`service.py:254`, good), and
-  `forge.push_branch` is regex-restricted (`forge.py:73`, good). The merge/diff refs are built internally. Add
+- **#6 P3: git ref arguments.** The `base`/`branch` strings reach `git diff {base}...HEAD` (`gitops.py:299`, `309`,
+  `315`), `git merge branch` (`gitops.py:358`) and `worktree add ... start` (`gitops.py:243`, `245`, `256`). Since
+  #1407, `ship` diffs `HEAD...{sha}` (`service.py:941`) with a `sha` from `rev-parse --verify` (`service.py:914`), not
+  the branch name. `start` is validated with `rev-parse --verify` first (`service.py:254`, good), and
+  `forge.push_branch` is regex-restricted (`forge.py:94`, good). The merge/diff refs are built internally. Add
   `--end-of-options` or reject a leading `-` for defence in depth.
 - **#10 P3: OpenCode prompt in argv** (`runners.py:265`). Other local users can see it in the process list, and its
   size is bounded by the OS command-line limit. `--` prevents option injection. The API key is passed only when
@@ -77,7 +77,7 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
   not re-checked by test). An edited root or `docs/` `CODEOWNERS` changes nothing until a reviewed merge to the
   base, where the file shows in the diff; JARVES never pushes the default branch. Also, `.github/CODEOWNERS`
   (protected) wins when present.
-- **#12 P3: nested `.claude/`.** `is_protected()` (`gitops.py:216-221`) matches `PROTECTED` prefixes from the repo
+- **#12 P3: nested `.claude/`.** `is_protected()` (`gitops.py:336-341`) matches `PROTECTED` prefixes from the repo
   root only, so `sub/.claude/settings.json` is not flagged. Why P3, not P1 like #1: the coding run starts the agent
   at the worktree root (`_run_agent`, `engine.py:275`, passes `wt` as `cwd` to `runners.py:107`), so a later task loads the
   root `.claude/`, which is protected, not a nested one. The risk is a person who later opens Claude Code in that
