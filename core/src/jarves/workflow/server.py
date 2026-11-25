@@ -106,6 +106,7 @@ SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
 UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
 UNLOCK_WRONG_TOTAL = 5        # over all sessions, unchanged by #1265: at most 5 guesses of 10,000 per code
+UNLOCK_WRONG_LATER = 1        # #1416: shared by ALL windows that logged in after the code's first wrong try
 
 
 @dataclass
@@ -114,7 +115,8 @@ class UnlockWrong:
     salt: str = ""
     total: int = 0
     by_session: dict[str, int] = field(default_factory=dict)
-    first_login: int = 0  # #1416: login number when the first wrong try came; later logins cannot guess this code
+    first_login: int = 0  # #1416: login number at the first wrong try; later logins share UNLOCK_WRONG_LATER
+    later: int = 0        # wrong tries made by those later logins together
 
 
 def session_key(token: str, session: str) -> str:
@@ -507,9 +509,12 @@ class Handler(BaseHTTPRequestHandler):
                                  "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
                                  "reason": "session_exhausted"})
                 return
-            if wrong.total and self.server.login_no.get(session, 0) > wrong.first_login:
-                # #1416: a login made after a wrong try cannot add tries, so 3 + 2 from a second login no longer
-                # cancels the owner's code. Windows open before the first wrong try keep their tries.
+            # login_no and logins are written by _login under this same session_lock (R3); a new salt above replaced
+            # unlock_wrong, so first_login and later start again for each new code (R4).
+            is_later = bool(wrong.total) and self.server.login_no.get(session, 0) > wrong.first_login
+            if is_later and wrong.later >= UNLOCK_WRONG_LATER:
+                # #1416: logging in again after wrong tries adds one shared try, not 3 per window, so 3 + 2 from a
+                # second login no longer reaches the backstop. Windows open before the first wrong try keep theirs.
                 self._json(403, {"error": "this window opened after a wrong code; use the code in a window opened "
                                  "earlier, or run 'jarvis workflow unlock' in your own terminal for a new code",
                                  "locked": True, "reason": "session_too_new"})
@@ -519,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
                     wrong.first_login = self.server.logins
                 wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
                 wrong.total += 1
+                wrong.later += is_later
                 if wrong.total >= UNLOCK_WRONG_TOTAL:
                     path.unlink(missing_ok=True)
                     self.server.unlock_wrong = UnlockWrong()

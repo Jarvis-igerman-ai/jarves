@@ -192,16 +192,28 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
         self.cookie = ""
         self.login()                                                   # log in again for a fresh window B
-        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, "session_too_new")] * 2)
-        self.assertEqual(self.wrong_try(shown), (403, "session_too_new"))   # no guess at all, even a right one
-        self.assertEqual(self.server.unlock_wrong.total, 3)            # B's refusals use none of the shared tries
-        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives 3 + 2
+        self.assertEqual(self.wrong_try(wrong), (403, None))           # later windows share ONE try in total
+        self.cookie = ""
+        self.login()                                                   # and again for window C
+        self.assertEqual(self.wrong_try(wrong), (403, "session_too_new"))
+        self.assertEqual(self.wrong_try(shown), (403, "session_too_new"))   # the shared later try is used up
+        self.assertEqual(self.server.unlock_wrong.total, 4)            # below the backstop: 3 + 1, never 3 + 2
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives
         self.cookie = owner
         self.assertEqual(self.wrong_try(shown), (200, None))
         shown = unlock.issue(self.home)                                # a new code: B may guess it
         self.cookie = ""
         self.login()
         self.assertEqual(self.wrong_try(shown), (200, None))
+
+    def test_owner_window_opened_after_one_wrong_try_can_unlock_1416(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # a token holder's existing window
+        self.assertEqual(self.wrong_try(wrong), (403, None))           # one wrong try sets the login mark
+        self.cookie = ""
+        self.login()                                                   # the owner opens or reloads the dashboard
+        self.assertEqual(self.wrong_try(shown), (200, None))           # not refused outright
 
     def test_restored_session_keeps_its_tries_after_a_later_login_1416(self):
         sid = self.login()                                             # the owner's window, stored for a restart
