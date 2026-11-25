@@ -130,7 +130,8 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     now = time.time() if now is None else now
     path = Path(home) / "sessions.json"
     try:
-        # JAR-260: a file from before #824 keeps the folder ACL. The only caller is Server.__init__ (self.restored).
+        # JAR-260: a file from before #824 keeps the folder ACL; startup tightening is pinned by
+        # test_workflow_home_acl.py::test_existing_sessions_file_is_owner_only_after_startup_load.
         if path.is_file():
             _tighten_once(path)  # before the read, so an unreadable file is tightened too
         raw = json.loads(path.read_text(encoding="utf-8"))

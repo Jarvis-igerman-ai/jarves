@@ -101,7 +101,7 @@ def test_unreadable_sessions_file_is_still_tightened(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_TIGHTENED", set())
     (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
 
-    def locked(self, *a, **k):
+    def locked(self, *a, **k):  # PermissionError is an OSError: load_sessions' `except (OSError, ...)` maps it to {}
         raise PermissionError(13, "locked", str(self))
     monkeypatch.setattr(Path, "read_text", locked)
     assert server.load_sessions(tmp_path) == {}
