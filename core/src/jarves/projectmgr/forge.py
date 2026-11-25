@@ -35,16 +35,34 @@ def repo_slug(path: str) -> str:
     return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
-def gh(path: str, *args: str, input_: str | None = None, timeout: float = 120) -> str:
+_PART = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\Z")
+
+
+def _repo_arg(path: str) -> str:
+    """#1622: gh is told the repository (read through gitops.git, never by gh's own git reads), as the LAST option."""
+    slug = repo_slug(path)
+    if not all(_PART.match(x) for x in slug.split("/")) or slug.count("/") != 1:
+        raise ForgeError("this project's origin is not a github.com repository")
+    return f"--repo={slug}"
+
+
+def gh(path: str, *args: str, input_: str | None = None, timeout: float = 120, repo: bool = True) -> str:
+    """Runs gh for the project at `path`. #1622: gh resolves remotes with its own git reads, which bypass gitops.git()
+    and would read the project's agent-writable config (core.fsmonitor, url.*.insteadOf, remote.*.url). So gh runs
+    in a fresh empty folder outside the project with GIT_DIR pinned to a missing path (no repository is found there),
+    and repo=True appends --repo=<owner/repo> taken from origin through gitops.git(). repo=False: `auth status`."""
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
-    env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"})
-    for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
-        if os.environ.get(k):
-            env[k] = os.environ[k]
-    p = subprocess.run([*cmd, *args], cwd=path, capture_output=True, text=True, timeout=timeout, env=env,
-                       creationflags=_NOWIN, input=input_, encoding="utf-8", errors="replace")
+    tail = [_repo_arg(path)] if repo else []
+    with tempfile.TemporaryDirectory(prefix="jarves-gh-", ignore_cleanup_errors=True) as box:
+        env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
+                                "GIT_DIR": os.path.join(box, "no-repository")})
+        for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
+            if os.environ.get(k):
+                env[k] = os.environ[k]
+        p = subprocess.run([*cmd, *args, *tail], cwd=box, capture_output=True, text=True, timeout=timeout, env=env,
+                           creationflags=_NOWIN, input=input_, encoding="utf-8", errors="replace")
     if p.returncode != 0:
         raise ForgeError(" ".join((p.stderr or p.stdout or "gh failed").split())[:300])
     return p.stdout
@@ -59,7 +77,7 @@ def status(path: str) -> dict:
     out = {"git": True, "gh": bool(gh_cmd()), "signed_in": False, "repo": repo_slug(path)}
     if out["gh"]:
         try:
-            gh(path, "auth", "status")
+            gh(path, "auth", "status", repo=False)
             out["signed_in"] = True
         except (ForgeError, OSError, subprocess.SubprocessError):
             pass
@@ -126,6 +144,12 @@ def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:
 
 def pr_checks(path: str, ref: str) -> list[dict]:
     """CI of a PR (number, URL or branch): [{name, state, bucket}] (bucket: pass|fail|pending|skipping|cancel)."""
+    # #1622: a URL of another repository would override --repo, an option-like ref would add options
+    m = re.match(r"^https://github\.com/([^/]+/[^/]+)/pull/(\d+)/?\Z", ref, re.A)
+    if m and f"--repo={m.group(1)}".lower() == _repo_arg(path).lower():
+        ref = m.group(2)
+    if not (re.match(r"^\d+\Z", ref, re.A) or re.match(r"^jarves/p\d+/[\w.\-/]+\Z", ref, re.A)):
+        raise ForgeError("JARVES checks only a PR number, its URL or a jarves/p<N>/... branch of this project")
     try:
         out = gh(path, "pr", "checks", ref, "--json", "name,state,bucket")
     except ForgeError as e:
