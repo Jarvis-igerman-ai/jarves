@@ -1410,3 +1410,15 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
     assert branch not in t["waiting"]
     sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
+
+
+def test_ship_without_an_integration_commit_says_so(env):
+    """#1407: ship resolves the integration commit first; with no such branch it refuses instead of merging a name."""
+    m, repo, home = env
+    open_project(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    if integ.exists():
+        sh(repo, "git", "worktree", "remove", "--force", str(integ))
+    sh(repo, "git", "branch", "-D", gitops.integration_branch(1))
+    for apply in (False, True):
+        assert m.call("ship_plan", project="demo", apply=apply, yes=True)["code"] == "NO_INTEGRATION"
