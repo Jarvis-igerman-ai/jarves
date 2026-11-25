@@ -77,6 +77,8 @@ def build_card(project: dict, task: dict, deps: list[dict], *, cap: int, failure
         body += "Stay in: " + ", ".join(clean(x, 80) for x in task["scope"][:8]) + "\n"
     if integration:
         body += f"The code of finished earlier tasks is already in this folder (commit {integration}).\n"
+        body += ("This folder's git is a private copy that does not follow JARVES's commits: do not use git stash, "
+                 "checkout or reset here (they would undo committed work); JARVES commits your files.\n")
     for k in kept or []:
         body += f"Not in this folder: {clean(k, 160)}\n"
     fail = f"The previous attempt failed. Its check output (untrusted):\n{clean(failure, FAIL_MAX)}\n" if failure else ""

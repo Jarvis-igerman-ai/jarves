@@ -123,6 +123,14 @@ def _entry(repo: str, wt: Path) -> str:
     raise GitError(f"task folder {Path(wt).name} has no worktree entry in the owner repository")
 
 
+def _private_git(wt: Path) -> bool:
+    """True when `<wt>/.git` is the folder's own real directory: not a symlink, not a Windows junction, no
+    `commondir` (a linked worktree's), and its real path is inside the folder (#1599 review R1 of 62e7f42)."""
+    own = wt / ".git"
+    return (own.is_dir() and not own.is_symlink() and not os.path.isjunction(own)
+            and _key(own) == os.path.normcase(os.path.join(os.path.realpath(wt), ".git")) and not (own / "commondir").exists())
+
+
 def _task_env(cwd: str | Path) -> dict[str, str]:
     """GIT_DIR/GIT_WORK_TREE for a task folder (#1599), {} elsewhere. The folder's own `.git` is a private copy the
     agent's git may write; JARVES's git uses the owner repository's entry instead, which JARVES finds from the
@@ -133,8 +141,7 @@ def _task_env(cwd: str | Path) -> dict[str, str]:
     wt = Path(cwd)
     if not (_TASK_NAME.fullmatch(wt.name) and wt.parent.name == "wt" and "projects" in wt.parts and wt.exists()):
         return {}
-    own = wt / ".git"
-    if own.is_symlink() or not own.is_dir() or (own / "commondir").exists():
+    if not _private_git(wt):
         raise GitError(f"task folder {wt.name}: its .git links to a shared repository (an older install or a "
                        "replaced .git); JARVES will not run git there (start the stage again)")
     k = _key(wt)
@@ -327,7 +334,7 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
     wt = Path(wt)
     _PROJECTS[_key(wt.parent.parent)] = str(repo)
     dotgit = wt / ".git"
-    if dotgit.is_dir() and not dotgit.is_symlink() and not (dotgit / "commondir").exists():
+    if _private_git(wt):
         return                                               # already private
     _ENTRIES[_key(wt)] = _entry(repo, wt)                   # from the owner's side, before the link goes
     tmp = wt.with_name(f".{wt.name}.clone")
@@ -335,7 +342,7 @@ def adopt_task_folder(repo: str, wt: Path, branch: str) -> None:
         _rmtree(tmp)
         try:
             git(repo, "clone", "-q", "--no-checkout", "--no-hardlinks", "--no-tags", "--single-branch", "-b", branch,
-                str(repo), str(tmp))
+                str(repo), str(tmp), timeout=900)          # a full copy of the branch's history: large repos
             git(tmp, "remote", "remove", "origin")
             git(tmp, "reset", "-q")                          # the copy's index = its HEAD; the folder's files stay
             moved = os.path.lexists(dotgit)

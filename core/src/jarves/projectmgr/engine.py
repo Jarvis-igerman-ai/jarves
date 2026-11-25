@@ -715,7 +715,8 @@ class StageEngine:
                 except gitops.GitError as e:
                     return ("stop", "failed", f"git failed: {clean(e, 200)}")
             what = "write a failing test for the bug" if kind == "reproduce" else "edit the code"
-            return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
+            return ("park", f"your turn: {what} in {wt}: edit the files, then say done (JARVES commits them on {br}; "
+                            "git inside that folder is a private copy and does not reach the branch)")
         where = t["worktree"] or str(self._integration(p))
         at = self._integration_sha(p)[:12] or base                  # the commit, not the movable name (#1469)
         # the task's commit, read in the owner's repository: a task folder's own `.git` is a private copy (#1599)

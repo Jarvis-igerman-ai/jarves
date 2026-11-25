@@ -1436,3 +1436,23 @@ def test_ship_without_an_integration_commit_says_so(env):
     sh(repo, "git", "branch", "-D", gitops.integration_branch(1))
     for apply in (False, True):
         assert m.call("ship_plan", project="demo", apply=apply, yes=True)["code"] == "NO_INTEGRATION"
+
+
+def test_a_restarted_manager_knows_each_project_repository_from_its_record(env):
+    """#1599 review R6: JARVES finds a task folder's owner repository only from its own records. A new manager
+    (a restart) registers every recorded project when it loads, so a task folder still works before any task runs."""
+    m, repo, home = env
+    open_project(m, repo)
+    gitops._PROJECTS.clear()
+    again = Manager(home, Config(), ask=lambda *a, **k: True)
+    try:
+        assert gitops._PROJECTS[gitops._key(gitops.project_root(home, 1))] == str(repo)
+    finally:
+        again.stop()
+
+
+def test_the_agent_card_warns_that_the_folder_git_is_a_private_copy():
+    """#1599 review R4: the folder's git does not follow JARVES's commits, so stash/checkout/reset there would undo
+    committed work; the card says so."""
+    card = cards.build_card({"name": "p"}, {"seq": 1, "title": "t", "spec": "s"}, [], cap=3000, integration="abc")
+    assert "private copy" in card and "git stash" in card

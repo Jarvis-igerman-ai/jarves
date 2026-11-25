@@ -464,3 +464,36 @@ def test_a_failed_git_swap_puts_the_link_back(tmp_path, monkeypatch):
     monkeypatch.setattr(gitops.os, "replace", real)
     gitops.adopt_task_folder(str(repo), wt, br)
     assert (wt / ".git").is_dir() and gitops.git(wt, "status", "--porcelain").returncode == 0
+
+
+def test_a_folder_git_that_is_a_junction_is_refused_and_never_kept(tmp_path, monkeypatch):
+    """#1599 review R1 (62e7f42): a Windows junction is not a symlink and is a directory, and the owner's `.git` has
+    no `commondir`. The folder's `.git` must also be its own real directory: a junction is refused by
+    git() and not kept as "already private" by adoption. Off Windows the junction test is os.path.isjunction."""
+    repo, _home, wt = _task(tmp_path)
+    real = gitops.os.path.isjunction
+    monkeypatch.setattr(gitops.os.path, "isjunction", lambda p: str(p).endswith(".git") or real(p))
+    with pytest.raises(gitops.GitError, match="replaced .git"):
+        gitops.commit_all(wt, "jarves")
+    assert not gitops._private_git(wt)
+
+
+@pytest.mark.windows_only                                  # NTFS junctions exist only on Windows
+def test_a_real_ntfs_junction_to_the_owner_git_is_refused(tmp_path):
+    repo, _home, wt = _task(tmp_path)
+    gitops._rmtree(wt / ".git")
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(wt / ".git"), str(repo / ".git")], check=True,
+                   capture_output=True)
+    with pytest.raises(gitops.GitError, match="replaced .git"):
+        gitops.commit_all(wt, "jarves")
+
+
+def test_a_git_folder_whose_real_path_is_elsewhere_is_refused(tmp_path, monkeypatch):
+    """#1599 review R1 (62e7f42): any `.git` whose real path is outside the folder (a mount or reparse point git
+    follows) is refused."""
+    _repo, _home, wt = _task(tmp_path)
+    real, own = gitops.os.path.realpath, str(wt / ".git")
+    monkeypatch.setattr(gitops.os.path, "realpath",
+                        lambda p, **k: str(tmp_path / "elsewhere") if str(p) == own else real(p, **k))
+    with pytest.raises(gitops.GitError, match="replaced .git"):
+        gitops.commit_all(wt, "jarves")
