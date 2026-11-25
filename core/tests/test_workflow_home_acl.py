@@ -15,13 +15,16 @@ import pytest
 from jarves.workflow import server
 from jarves.workflow.winproc import hidden_popen_kwargs
 
-_PS = ("$me=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; \"ME|$me\"; "
-       "(Get-Acl -LiteralPath $env:JAR260_PATH).Access | "
-       "ForEach-Object { \"ACE|$($_.IdentityReference)|$($_.IsInherited)\" }")
+# SIDs, not account names: names are localised (a Hebrew Windows prints another word for Users), SIDs are
+# ASCII on every locale (#1783 review R2). GetAccessRules(..., SecurityIdentifier) needs no name lookup.
+_PS = ("$me=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; \"ME|$me\"; "
+       "(Get-Acl -LiteralPath $env:JAR260_PATH).GetAccessRules($true, $true, "
+       "[System.Security.Principal.SecurityIdentifier]) | "
+       "ForEach-Object { \"ACE|$($_.IdentityReference.Value)|$($_.IsInherited)\" }")
 
 
 def _acl(path: Path) -> tuple[str, list[tuple[str, bool]]]:
-    """(current user, [(identity, inherited)]) for one file, via a fixed PowerShell argv (no shell)."""
+    """(current user SID, [(SID, inherited)]) for one file, via a fixed PowerShell argv (no shell)."""
     env = dict(os.environ, JAR260_PATH=str(path))
     r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _PS],
                        capture_output=True, text=True, timeout=60, check=True, env=env, **hidden_popen_kwargs())
@@ -36,22 +39,10 @@ def _acl(path: Path) -> tuple[str, list[tuple[str, bool]]]:
     return me, aces
 
 
-def _sid_name(sid: str) -> str:
-    """Account name for a well-known SID, lower case, as Get-Acl prints it (names are localised)."""
-    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                        "(New-Object System.Security.Principal.SecurityIdentifier $env:JAR260_SID)"
-                        ".Translate([System.Security.Principal.NTAccount]).Value"],
-                       capture_output=True, text=True, timeout=60, check=True,
-                       env=dict(os.environ, JAR260_SID=sid), **hidden_popen_kwargs())
-    name = r.stdout.strip().lower()
-    assert name, r.stderr
-    return name
-
-
 def _assert_owner_only(path: Path) -> None:
     me, aces = _acl(path)
     assert [a for a in aces if a[1]] == [], f"{path.name} still has inherited ACEs: {aces}"
-    others = [ident for ident, _ in aces if ident.lower() != me.lower()]
+    others = [sid for sid, _ in aces if sid != me]
     assert others == [], f"{path.name} grants other principals: {others}"
 
 
@@ -90,7 +81,6 @@ def test_existing_sessions_file_is_owner_only_after_startup_load(tmp_path, monke
     old = home / "sessions.json"
     old.write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
     _, before = _acl(old)
-    users = _sid_name("S-1-5-32-545")  # localised name of BUILTIN\Users (#1778 review R3)
-    assert (users, True) in [(i.lower(), inh) for i, inh in before], (users, before)
+    assert ("S-1-5-32-545", True) in before, before  # compared by SID, not localised name (#1783 R2)
     server.load_sessions(home)
     _assert_owner_only(old)

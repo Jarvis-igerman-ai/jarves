@@ -1,6 +1,7 @@
 """#824: access.token / sessions.json get an owner-only ACL on Windows (icacls mocked; no real ACL changes)."""
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -120,3 +121,25 @@ def test_relative_and_absolute_path_share_one_key(monkeypatch, tmp_path):
     # cannot give a different string for the same folder (#1778 review R2).
     server.load_sessions(Path(os.getcwd()))
     assert len(seen) == 1
+
+
+def test_failed_startup_tighten_logs_one_warning(monkeypatch, tmp_path, caplog):
+    """Review R1 (#1783): the docstring's "logged by owner_only_file" is real, once per process."""
+    calls = []
+    real = server.owner_only_file
+
+    def on_windows(p):  # os.name is "nt" only inside the real function: pathlib must stay POSIX here
+        with monkeypatch.context() as m:
+            m.setattr(server.os, "name", "nt")
+            return real(p)
+    monkeypatch.setattr(server, "owner_only_file", on_windows)
+    monkeypatch.setenv("USERNAME", "alice")
+    monkeypatch.setattr(server.subprocess, "run", _run_recorder(calls, rc=5))  # icacls fails
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger=server.__name__):
+        server.load_sessions(tmp_path)
+        server.load_sessions(tmp_path)
+    warns = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warns == ["could not set an owner-only ACL on sessions.json"]
+    assert len(calls) == 1
