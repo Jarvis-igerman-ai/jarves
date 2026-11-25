@@ -41,6 +41,9 @@ KEYS = [
     "door key: 4821-9933",
     "the key is 13/45/9999",
     "token: 99:99:99",
+    # #1099 review 8: R2 the Hebrew bare "key" (מפתח) with a value; R3 a date glued to more text is no date
+    "המפתח שלי הוא abc12345",
+    "wifi key: 2026-12-01.hunter22",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -84,6 +87,11 @@ PLAIN = [
     "the key meeting is 10:30am",
     "key dates: 31/12/2026",
     "key call: 9:15pm",
+    "key dates: 2026-12-01.",
+    # #1099 review 8 R1: keyboard shortcuts are not credentials
+    "the key is ctrl+space",
+    "shortcut key: ctrl+alt",
+    "use the key ctrl+shift+k",
     "fix api key loader: done",
     "client secret rotation: done",
     "fix key loader in commit 9fceb02d0ae598e95dc970b74767f19372d61af8",   # SHA more than two words after "key"

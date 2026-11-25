@@ -25,7 +25,6 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 425 | Windows toast fallback test when tray/popup cannot show | testing | Fallback path is untested | test |
 | 426 | Installer restart smoke: silent install restores pre-install state (#383) | testing / installer | Restart behaviour not covered by a smoke test | test |
 | 427 | Hotfix apply test on a real source tree (copy, apply, verify, rollback) | testing / hotfix | Only mocked trees are tested | test |
-| 1099-a | preferences.looks_sensitive allows a bare 32+ hex string with no key word within two words (documented tradeoff so git SHAs pass) | prefs / security | A pasted hex key without a key word nearby can still be learned | review #1753 R5 |
 | 497 | GitHub write: reset-audit / deleting audit files reset the rate limit without popup | github write | Rate limit can be reset by local file edits (owner-local only) | review |
 | 508 | Release gate: signed sheet has no owner identity or content hash | release gate | Sheet signature is not bound to the owner or content | review |
 | 518 | release_flow: review findings from PR 514 | release | Minor review nits | review |
@@ -56,6 +55,7 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 667a | workflows other than release.yml pin first-party actions by tag (actions/checkout@v7, codeql-action@v4, cache@v6, upload-artifact@v7), release.yml pins by SHA; the pull_request_target workflows (autolabel, dependabot-automerge) use the tag form | CI | A moved tag runs new code in a workflow with a write token; pin by SHA and let Dependabot bump | review (agent 1 read-through 27 Oct) |
 | 385a | the new goal_plans texts ("it may already have happened", "the plan changed in the meantime", unknown-step phone refusal) are English only, like the existing goal_plans strings | goals | Hebrew users see English in the retry popup and errors; add to hebrew_parts and the dashboard locale part | review (Opus review of #812) |
 | 1059a | workflow console: the shared `.demo-notice` band keeps hard-coded dark colours (#221d13 / #dfba76) in the light theme | workflow console UI | Dark band on the light Health/Timeline/Today demo pages; out of JAR-194 scope (.hl-*/.tl-* only) | review #1059 |
+| 1099-a | preferences.looks_sensitive allows a bare 32+ hex string with no key word within two words (documented tradeoff so git SHAs pass) | prefs / security | A pasted hex key without a key word nearby can still be learned | review #1753 R5 |
 
 ## Kept as issues
 
