@@ -58,3 +58,22 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     names = [p.name for p in seen]
     assert names.count("access.token") == 2  # created, then existing file tightened once
     assert any(n.startswith("sessions.") for n in names)  # the temp file, locked before it is written
+
+
+def test_existing_sessions_file_is_tightened_at_startup(monkeypatch, tmp_path):
+    """JAR-260 reopened: an upgraded install's sessions.json was only read, so it kept the folder ACL."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    assert server.load_sessions(tmp_path) == {}
+    server.load_sessions(tmp_path)
+    assert seen == [tmp_path / "sessions.json"]  # once per process, the real file (not a temp copy)
+
+
+def test_missing_sessions_file_is_not_tightened(monkeypatch, tmp_path):
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == []

@@ -1,0 +1,1 @@
+- Fixed: on Windows an existing workflow sessions.json is now given the owner-only ACL once when the server loads it at startup, so a file written before the #824 fix no longer keeps the inherited folder ACL until the next sign-in rewrites it (JAR-835, re-fix of JAR-260).
