@@ -34,7 +34,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "system.gitconfig"))
     monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_SYSTEM"))
-    monkeypatch.setattr(forge, "gh_cmd", lambda: [])                 # no real gh login reaches a test push
+    monkeypatch.setattr(forge, "gh_cmd", list)                 # no real gh login reaches a test push
     return bare
 
 
@@ -128,7 +128,7 @@ def test_global_http_settings_do_not_reach_the_push_config(tmp_path, home, secti
     _global(section)
     env = forge._push_env(str(tmp_path), "https://github.com/o/r.git")
     out = subprocess.run(["git", "config", "--get-urlmatch", "http", "https://github.com/o/r.git"], cwd=tmp_path,
-                         capture_output=True, text=True, env=gitops.child_env(env)).stdout
+                         capture_output=True, text=True, env=gitops.child_env(env), check=True).stdout
     assert "evil.invalid" not in out and "http.sslverify true" in out.lower(), out
 
 
@@ -152,7 +152,7 @@ def test_the_push_uses_the_owners_gh_login_as_its_only_credential_helper(tmp_pat
     monkeypatch.setattr(forge, "gh_cmd", lambda: ["/opt/o's gh/gh"])
     env = forge._push_env(str(tmp_path), URL)
     out = subprocess.run(["git", "config", "--get-regexp", r"^credential\."], cwd=tmp_path, capture_output=True,
-                         text=True, env=gitops.child_env(env)).stdout
+                         text=True, env=gitops.child_env(env), check=True).stdout
     assert "evil" not in out and out.splitlines()[-2:] == ["credential.helper ",   # empty: earlier helpers reset
                                                            "credential.helper !'/opt/o'\\''s gh/gh' auth git-credential"]
 
