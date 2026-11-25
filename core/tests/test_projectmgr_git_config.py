@@ -2,6 +2,7 @@
 own git calls. An agent can write `.git/config`, an included file and `.git/info/attributes` (no commit needed)."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -369,16 +370,24 @@ def test_a_filter_an_agent_adds_after_the_config_read_never_runs(tmp_path, monke
     repo, wt = _task(tmp_path)
     marker, real, calls = tmp_path / "ran.txt", gitops.shared_config_overrides, []
 
+    real_git = gitops.git
+
     def racing(cwd):
         env = real(cwd)
-        calls.append(cwd)
-        if len(calls) == 2:                     # commit_all: ls-files, then `add -A` (the clean filter's call)
+        if calls and calls[-1][:1] == ("add",) and len(calls[-1]) > 1:      # the `add -A` (clean filter's) call
             subprocess.run(["git", "config", "filter.late.clean", _sh(marker)], cwd=wt, check=True)   # the agent
+            calls[-1] = ("injected",)
         return env
+
+    def tracing(cwd, *args, **kw):
+        calls.append(args)
+        return real_git(cwd, *args, **kw)
     monkeypatch.setattr(gitops, "shared_config_overrides", racing)
+    monkeypatch.setattr(gitops, "git", tracing)
     (wt / ".gitattributes").write_text("* filter=late\n", encoding="utf-8")
     (wt / "a.py").write_text("1\n", encoding="utf-8")
     assert gitops.commit_all(wt, "a")
+    assert ("injected",) in calls                                   # the race was really exercised
     assert not marker.exists()
     assert "late" not in (repo / ".git" / "config").read_text(encoding="utf-8")
 
@@ -430,3 +439,38 @@ def test_a_task_folder_is_adopted_again_after_a_restart_or_fails_closed(tmp_path
     finally:
         gitops._TASK_GIT.clear()
         gitops._TASK_GIT.update(saved)
+
+
+def test_a_linked_task_folder_git_is_replaced_never_written_through(tmp_path, monkeypatch):
+    """#1599 review R1: `.git` swapped for a link into the owner's `.git` (a Windows junction is not a symlink to
+    `is_symlink`; simulated here) is removed as a link; JARVES never rmtree-s or re-inits through it."""
+    repo, wt = _task(tmp_path)
+    owner = repo / ".git"
+    before = {n: (owner / n).read_bytes() for n in ("HEAD", "index")}
+    shutil.rmtree(wt / ".git")
+    (wt / ".git").symlink_to(owner, target_is_directory=True)
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False if self.name == ".git" else os.path.islink(self))
+    monkeypatch.setattr(Path, "is_junction", lambda self: self.name == ".git" and os.path.islink(self), raising=False)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    assert (wt / ".git").is_dir() and not os.path.islink(wt / ".git")
+    assert {n: (owner / n).read_bytes() for n in ("HEAD", "index")} == before
+    assert not (owner / "objects" / "info" / "alternates").exists()
+
+
+def test_the_rmtree_handler_never_ignores_a_link_it_cannot_remove(tmp_path):
+    """#1599 review R1: rmtree reports a top-level link or junction as an error from `islink`; that is re-raised."""
+    with pytest.raises(OSError, match="junction"):
+        gitops._writable(os.path.islink, str(tmp_path), OSError("junction"))
+
+
+def test_removing_an_adopted_task_folder_removes_its_entry_and_branch(tmp_path):
+    """#1599 review R2: `.git` is a folder now (not a gitfile); cleanup still removes folder, entry and branch."""
+    repo, wt = _task(tmp_path)
+    br = gitops.task_branch(1, 1, 1)
+    gitops.remove_worktree(str(repo), wt, br)
+    assert not wt.exists()
+    assert not list((repo / ".git" / "worktrees").glob("t1-a1*"))
+    assert gitops.git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode != 0
+    wt2, _ = gitops.new_task_worktree(tmp_path / "home", str(repo), 1, 1, 1)      # a retry onto the same path
+    assert wt2 == wt and (wt / ".git").is_dir() and gitops.git(wt, "status", "--porcelain").stdout == ""

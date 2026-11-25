@@ -142,13 +142,19 @@ def adopt_task_folder(repo: str, wt: Path) -> None:
     with _TASK_LOCK:
         _TASK_GIT[_key(wt)] = {"GIT_DIR": str(entry), "GIT_WORK_TREE": os.path.realpath(str(wt))}
     dot = Path(wt) / ".git"
-    if not dot.is_dir() or dot.is_symlink():
+    if not dot.is_dir() or _is_link(dot):
         _private_git(wt)
 
 
+def _is_link(path: Path) -> bool:
+    """A symlink or a Windows junction (`is_symlink` is False for a junction)."""
+    return path.is_symlink() or path.is_junction() or os.path.islink(path)
+
+
 def _writable(func, path, exc) -> None:
-    """rmtree on Windows: git objects are read-only files. A link is never chmod-ed (that would follow it)."""
-    if os.path.islink(path):
+    """rmtree on Windows: git objects are read-only files. A link or junction is never chmod-ed (that would follow it),
+    and rmtree's own refusal of a top-level link or junction (reported from `islink`) is re-raised, never ignored."""
+    if func is os.path.islink or _is_link(Path(path)):
         raise exc
     os.chmod(path, stat.S_IWRITE)
     func(path)
@@ -164,10 +170,14 @@ def _private_git(wt: Path) -> None:
     sha = git(wt, "rev-parse", "HEAD").stdout.strip()
     head = (entry / "HEAD").read_text(encoding="utf-8").strip()
     dot = Path(wt) / ".git"
-    if dot.is_dir() and not dot.is_symlink():
+    if _is_link(dot):
+        dot.unlink()                                   # removes the link or junction itself, never its target
+    elif dot.is_dir():
         shutil.rmtree(dot, onexc=_writable)            # rmtree unlinks a link inside, never follows it
     else:
         dot.unlink(missing_ok=True)
+    if dot.exists() or _is_link(dot):
+        raise GitError(f"cannot replace the .git of task folder {Path(wt).name}")
     git(Path(wt).parent, "init", "-q", "--template=", str(wt))
     (dot / "objects" / "info").mkdir(parents=True, exist_ok=True)
     (dot / "objects" / "info" / "alternates").write_text(str(common / "objects") + "\n", encoding="utf-8")
@@ -357,10 +367,16 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     """Only ever called for paths under <home>/projects (callers build them); a missing one is fine."""
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
+    with _TASK_LOCK:
+        _TASK_GIT.pop(_key(wt), None)                  # #1599: a retry onto this path is adopted afresh
     with _repo_lock(repo):
-        git(repo, "worktree", "remove", "--force", str(wt), check=False)
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)   # a private `.git` (#1599): refused,
+        # so the folder goes by rmtree below and `worktree prune` drops its entry
         if Path(wt).exists():
-            shutil.rmtree(wt, ignore_errors=True)
+            try:
+                shutil.rmtree(wt, onexc=_writable)     # the private `.git`'s objects are read-only on Windows
+            except OSError:
+                shutil.rmtree(wt, ignore_errors=True)
         git(repo, "worktree", "prune", check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)
