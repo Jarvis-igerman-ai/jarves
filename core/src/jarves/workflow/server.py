@@ -71,6 +71,7 @@ def owner_only_file(path: Path) -> bool:
 
 _TIGHTENED: set[str] = set()
 _TIGHTEN_FAILS: dict[str, int] = {}
+_TIGHTEN_INFLIGHT: dict[str, int] = {}  # reserved attempts whose icacls has not returned yet
 _TIGHTEN_TRIES = 3  # a permanently failing icacls runs and warns at most this often per file and process
 _TIGHTEN_LOCK = threading.Lock()  # guards the counters; icacls runs outside it with its attempt reserved
 
@@ -80,23 +81,29 @@ def _tighten_once(path: Path) -> None:
 
     Each attempt is reserved under the lock before icacls runs, so concurrent loads cannot exceed the cap.
     Off Windows owner_only_file is a no-op returning True, so the file is marked done on the first call.
-    Reaching the cap logs one error, so a file left with the inherited folder ACL stays visible (JAR-824)."""
+    When the cap is used up, the last attempt to return logs one error, and only if none succeeded,
+    so a file left with the inherited folder ACL stays visible (JAR-824)."""
     key = str(path)
     with _TIGHTEN_LOCK:
         attempt = _TIGHTEN_FAILS.get(key, 0) + 1
         if key in _TIGHTENED or attempt > _TIGHTEN_TRIES:
             return
         _TIGHTEN_FAILS[key] = attempt  # reserved; kept as a failure unless this attempt succeeds
-    ok = owner_only_file(path)  # never raises: icacls errors come back as False (test_fail_safe_never_raises)
-    with _TIGHTEN_LOCK:
-        if ok:
-            _TIGHTENED.add(key)
-            return
-        gave_up = attempt == _TIGHTEN_TRIES and key not in _TIGHTENED  # a concurrent attempt may have succeeded
+        _TIGHTEN_INFLIGHT[key] = _TIGHTEN_INFLIGHT.get(key, 0) + 1
+    ok = False
+    try:
+        ok = owner_only_file(path)  # never raises: icacls errors come back as False (test_fail_safe_never_raises)
+    finally:
+        with _TIGHTEN_LOCK:
+            left = _TIGHTEN_INFLIGHT[key] = _TIGHTEN_INFLIGHT[key] - 1
+            if ok:
+                _TIGHTENED.add(key)
+            gave_up = (not ok and left == 0 and key not in _TIGHTENED
+                       and _TIGHTEN_FAILS[key] >= _TIGHTEN_TRIES)  # no attempt outstanding, none succeeded
     if gave_up:
         logging.getLogger(__name__).error(
             "gave up setting an owner-only ACL on %s after %d attempts; it may keep the folder ACL until restart",
-            path.name, attempt)
+            path.name, _TIGHTEN_TRIES)
 
 
 def access_token(home: Path) -> str:
@@ -145,9 +152,9 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     """Unexpired stored session digests; a missing or damaged file means no stored sessions."""
     now = time.time() if now is None else now
     path = Path(home) / "sessions.json"
-    if path.is_file():  # a pre-fix file kept the inherited folder ACL until the next login (JAR-824, #824)
-        _tighten_once(path)
     try:
+        if path.is_file():  # a pre-fix file kept the inherited folder ACL until the next login (JAR-824, #824)
+            _tighten_once(path)  # inside the try: is_file re-raises e.g. PermissionError from stat
         raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
