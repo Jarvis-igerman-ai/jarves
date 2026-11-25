@@ -3,7 +3,6 @@ names; and the project's GitHub status names the git 2.31 prerequisite. Each com
 plain `git push origin` with the same config runs the marker command on this platform."""
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -190,8 +189,8 @@ def test_the_shared_config_cannot_redirect_the_push_or_weaken_its_tls(tmp_path, 
         gitops.git(repo, "config", k, v)
     neg = _plain(repo, "push", "origin", BRANCH)
     assert neg.returncode == 0 and BRANCH in _branches(evil)                 # negative control: plain push redirected
-    shutil.rmtree(evil)                                                      # review R3: a clean evil remote again
-    subprocess.run(["git", "init", "-q", "--bare", str(evil)], check=True)
+    subprocess.run(["git", "--git-dir", str(evil), "update-ref", "-d", f"refs/heads/{BRANCH}"], check=True)   # R3:
+    assert BRANCH not in _branches(evil)          # evil clean again (no rmtree: Windows git objects are read-only)
     seen, real = [], gitops.git
 
     def git(cwd, *a, **kw):
