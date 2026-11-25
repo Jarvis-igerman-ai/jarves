@@ -1,0 +1,1 @@
+- Added: the start (wake) and end (close) chimes are now checked on every CI run through a silent virtual audio sink: the real speaker path records the sound instead of playing it, and the test checks notes, length and level (core/tests/test_chimes.py). The ear check on real speakers stays UNVERIFIED.
