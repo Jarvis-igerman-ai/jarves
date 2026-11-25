@@ -70,14 +70,29 @@ def owner_only_file(path: Path) -> bool:
 
 
 _TIGHTENED: set[str] = set()
+_TIGHTEN_FAILS: dict[str, int] = {}
+_TIGHTEN_TRIES = 3  # a permanently failing icacls runs and warns at most this often per file and process
+_TIGHTEN_LOCK = threading.Lock()  # guards the counters only; icacls runs outside it (idempotent)
 
 
 def _tighten_once(path: Path) -> None:
-    """Fix an existing file once per process (idempotent)."""
+    """Fix an existing file once per process (idempotent); a failed attempt is retried, at most _TIGHTEN_TRIES times.
+
+    Reaching the cap logs one error, so a file left with the inherited folder ACL stays visible (JAR-824)."""
     key = str(path)
-    if key not in _TIGHTENED:
-        _TIGHTENED.add(key)
-        owner_only_file(path)
+    with _TIGHTEN_LOCK:
+        if key in _TIGHTENED or _TIGHTEN_FAILS.get(key, 0) >= _TIGHTEN_TRIES:
+            return
+    ok = owner_only_file(path)
+    with _TIGHTEN_LOCK:
+        if ok:
+            _TIGHTENED.add(key)
+            return
+        _TIGHTEN_FAILS[key] = fails = _TIGHTEN_FAILS.get(key, 0) + 1
+        if fails == _TIGHTEN_TRIES:
+            logging.getLogger(__name__).error(
+                "gave up setting an owner-only ACL on %s after %d attempts; it may keep the folder ACL until restart",
+                path.name, fails)
 
 
 def access_token(home: Path) -> str:
@@ -125,8 +140,11 @@ def session_key(token: str, session: str) -> str:
 def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     """Unexpired stored session digests; a missing or damaged file means no stored sessions."""
     now = time.time() if now is None else now
+    path = Path(home) / "sessions.json"
+    if path.is_file():  # a pre-fix file kept the inherited folder ACL until the next login (JAR-824, #824)
+        _tighten_once(path)
     try:
-        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
             return {}

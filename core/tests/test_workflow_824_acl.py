@@ -1,6 +1,7 @@
 """#824: access.token / sessions.json get an owner-only ACL on Windows (icacls mocked; no real ACL changes)."""
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -58,3 +59,51 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     names = [p.name for p in seen]
     assert names.count("access.token") == 2  # created, then existing file tightened once
     assert any(n.startswith("sessions.") for n in names)  # the temp file, locked before it is written
+
+
+def test_existing_sessions_file_is_tightened_at_startup(monkeypatch, tmp_path):
+    """JAR-824 (JAR-260 reopened): a sessions.json written before the fix kept the inherited folder ACL at
+    startup; only a later login rewrote it. Loading it now applies the owner-only ACL once."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == []  # no file: nothing to tighten, no icacls warning
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    server.load_sessions(tmp_path)
+    server.load_sessions(tmp_path)
+    assert [p.name for p in seen] == ["sessions.json"]
+
+
+def test_failed_tighten_is_retried_next_time(monkeypatch, tmp_path):
+    """JAR-824 review R2: a failed tighten must not mark the file done, or it is never retried in this process."""
+    results = [False, True]
+    seen: list[str] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p).name) or results.pop(0))
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    for _ in range(3):
+        server.load_sessions(tmp_path)
+    assert seen == ["sessions.json", "sessions.json"]  # failed, retried and succeeded, then done
+
+
+def test_permanent_tighten_failure_is_bounded(monkeypatch, tmp_path, caplog):
+    """JAR-824 review R1: a permanently failing icacls runs (and warns) at most _TIGHTEN_TRIES times per file."""
+    seen: list[str] = []
+
+    def failing(p) -> bool:
+        seen.append(Path(p).name)
+        return False
+
+    monkeypatch.setattr(server, "owner_only_file", failing)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    monkeypatch.setattr(server, "_TIGHTEN_FAILS", {})
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    with caplog.at_level(logging.ERROR, logger=server.__name__):
+        for _ in range(10):
+            server.load_sessions(tmp_path)
+    assert seen == ["sessions.json"] * server._TIGHTEN_TRIES
+    # JAR-824 review R2: the exhausted state is logged exactly once, not on every later load
+    gave_up = [r for r in caplog.records if "gave up" in r.getMessage()]
+    assert len(gave_up) == 1 and gave_up[0].levelno == logging.ERROR
