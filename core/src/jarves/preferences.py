@@ -82,8 +82,10 @@ _KEY_VALUE = re.compile(
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+"
     r"(?:(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}|[A-Za-z]{16,})|"
     # a value pasted after the keyword, at most two words later: one 6+ character word with both letters and digits
-    # ("api key abc123", "the token for prod a1b2c3d4e5", "הטוקן שלי abc12345")
-    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,2}}?\s+(?=[^\s.,;!?]*[A-Za-z])(?=[^\s.,;!?]*\d)[^\s.,;!?]{{6,}}", re.I)
+    # ("api key abc123", "the token for prod a1b2c3d4e5", "הטוקן שלי abc12345"); a hyphenated model or version name
+    # whose parts are all 1-6 characters ("gpt-4o", "claude-3-opus") is no value
+    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,2}}?\s+(?=[^\s.,;!?]*[A-Za-z])(?=[^\s.,;!?]*\d)"
+    r"(?!(?:[^\s.,;!?-]{1,6}-)+[^\s.,;!?-]{1,6}(?![^\s.,;!?]))[^\s.,;!?]{6,}", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either,
 # and neither is a camelCase name built from words of 2+ lowercase letters and numbers of up to four digits, so a

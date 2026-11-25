@@ -31,6 +31,8 @@ KEYS = [
     # #1099 review 2 R1: up to two words between the keyword and a pasted letters+digits value
     "the token for prod a1b2c3d4e5",
     "הטוקן שלי abc12345",
+    # #1099 doctor R1: the model-name exemption needs short hyphen parts; a long part is still a pasted value
+    "token abc-12345678",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -67,6 +69,10 @@ PLAIN = [
     "refactor parseReport2024QuarterlyTotals in reports",
     # #1099 review 2 R2: a count after "tokens:" is not a value
     "limit tokens: 4000 per day",
+    # #1099 doctor R1: a hyphenated model or version name of short parts after a key/token word is not a value
+    "raise the token limit for claude-3-opus",
+    "set max tokens for gpt-4o",
+    "the token budget for claude-opus-5-5",
 ]
 # Accepted over-refusal (fails closed, review 2 R2/R3): a word after "token:" and a long upper-case letter+digit code
 # are refused; the owner can rephrase ("fix the token refresh bug") and order numbers are not preferences.
