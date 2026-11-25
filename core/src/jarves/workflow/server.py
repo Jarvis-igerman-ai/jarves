@@ -39,12 +39,17 @@ def private_directory(path: Path) -> None:
         path.chmod(0o700)
 
 
+_OTHER_SIDS = ("*S-1-3-4", "*S-1-5-18", "*S-1-5-32-544")  # OWNER RIGHTS, SYSTEM, Administrators
+
+
 def owner_only_file(path: Path) -> bool:
     """Windows: drop inherited ACEs on a secret file and grant only the current user (#824).
 
     chmod is a no-op on NTFS, so access.token / sessions.json inherited the folder ACL (for example
     CodexSandboxUsers Modify). The folder itself is left alone so authorised workers keep database
-    access. Fails safe: returns False and never raises, so startup is never blocked."""
+    access. Explicit grants for OWNER RIGHTS, SYSTEM and Administrators are removed too (JAR-260): a parent
+    created with a protected DACL (Python 3.13 mkdir 0o700) hands them down without the inherited flag, so
+    /inheritance:r alone kept them. Fails safe: returns False and never raises, so startup is never blocked."""
     if os.name != "nt":
         return True
     user = os.environ.get("USERNAME")
@@ -53,7 +58,8 @@ def owner_only_file(path: Path) -> bool:
     domain = os.environ.get("USERDOMAIN")
     account = f"{domain}\\{user}" if domain else user
     try:
-        r = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:(F)"],
+        r = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:(F)",
+                            "/remove:g", *_OTHER_SIDS],
                            capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
         ok = r.returncode == 0
     except (OSError, subprocess.SubprocessError):

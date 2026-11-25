@@ -382,8 +382,9 @@ class Manager(StageEngine):
             return err
         st = forge.status(p["path"])
         mode = p.get("github") or "off"
-        return _res(True, "ok", f"{p['name']}: GitHub {mode}" + (f" ({st['repo']})" if st["repo"] else
-                    " (no github.com remote)"), mode=mode, **st)
+        where = (f" ({st['repo']})" if st["repo"] else " (no github.com remote)") if st.get("git", True) else \
+            f"; {st.get('git_error')}"                          # #1722: the remote was not checked without git 2.31
+        return _res(True, "ok", f"{p['name']}: GitHub {mode}{where}", mode=mode, **st)
 
     def runners_info(self, **_) -> dict:
         rows = []
@@ -899,37 +900,54 @@ class Manager(StageEngine):
         return _res(True, "ok", f"Last {hours:g} h in {p['name']}: " + (", ".join(
             f"#{t['seq']} {t['status']}" for t in fin) or "nothing finished"), tasks=[self._view(t) for t in fin])
 
-    def ship_plan(self, project: str = "", apply: bool = False, yes: bool = False, by: str = "owner", **_) -> dict:
+    def ship_plan(self, project: str = "", apply: bool = False, yes: bool = False, by: str = "owner", commit: str = "",
+                  **_) -> dict:
         """What the agents built and how to take it. apply=True (PC only, asks first) merges it into the branch your
-        project folder is on; only when that folder has no uncommitted changes. Never pushes."""
+        project folder is on; only when that folder has no uncommitted changes. Never pushes. commit: the integration
+        commit the owner reviewed in the plan (7+ hex chars); apply refuses when the branch moved since (#1407), and
+        yes=True (no prompt that shows the commit) needs it."""
         p, err = self._need_project(project)
         if err:
             return err
+        br = gitops.integration_branch(p["id"])
+        try:                     # #1407: the commit, not the movable branch name, is what the owner sees and gets
+            sha = gitops.git(p["path"], "rev-parse", "--verify", "-q", f"refs/heads/{br}^{{commit}}").stdout.strip()
+        except (OSError, gitops.GitError) as e:
+            return _res(False, "NO_INTEGRATION", f"no integration commit to ship: {e}"[:300])
         if apply:
-            br = gitops.integration_branch(p["id"])
+            want = (commit or "").strip().lower()
+            if want and (len(want) < 7 or not sha.startswith(want)):
+                return _res(False, "MOVED", f"the integration branch is now at {sha[:12]}, not the commit {want[:12]} "
+                                            "you reviewed: look at the plan again (jarvis project ship)", commit=sha)
+            if yes and not want:
+                return _res(False, "NEED_COMMIT", "with --yes, name the commit you reviewed: --commit <sha> from "
+                                                  "jarvis project ship", commit=sha)
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
-            if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
-                                             {"project": p["name"], "branch": st["branch"]}):
+            if not yes and not self._approve(f"Merge commit {sha[:12]} (from {br}) into {st['branch']} in {p['path']}? "
+                                             "(no push)", "project_ship",
+                                             {"project": p["name"], "branch": st["branch"], "commit": sha}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), br, ident=False)      # your own git identity / signing
+            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False)     # your own git identity / signing
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
-            logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
-            return _res(True, "ok", f"Merged {br} into {st['branch']}. Nothing was pushed.")
+            logs.info("projects", "PROJECT_SHIPPED", "integration commit merged into the owner branch", id=p["id"])
+            return _res(True, "ok", f"Merged commit {sha[:12]} into {st['branch']}. Nothing was pushed.", commit=sha)
         wt = gitops.project_root(self.home, p["id"]) / "integration"
-        br = gitops.integration_branch(p["id"])
         try:
-            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{br}", check=False).stdout.strip() or "no changes"
+            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}", check=False).stdout.strip() or "no changes"
         except (OSError, gitops.GitError):
             stat = "unknown"
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{br}", f"git -C \"{p['path']}\" merge --no-ff {br}   # when you are happy",
-                f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
-        return _res(True, "ok", f"{p['name']}: integration branch {br} has {stat}. JARVES does not merge or push; "
-                                "the commands are in the result.", branch=br, worktree=str(wt), commands=cmds)
+        # no raw git merge/push here: in your folder it would run hooks and commands from the shared .git/config,
+        # which agents can write; JARVES's own ship merges the commit with them neutralised
+        cmds = [f"jarvis project ship --project \"{p['name']}\" --apply --commit {sha}"]   # refuses if the branch moved
+        return _res(True, "ok", f"{p['name']}: integration commit {sha[:12]} ({br}) has {stat}. JARVES never pushes; "
+                                "a plain git merge or push in your folder runs hooks and commands from its shared "
+                                ".git/config, which agents can write.", branch=br, commit=sha, worktree=str(wt),
+                    commands=cmds)
 
     # ================================================================== the agents working on a project
     def _orch_call(self, op: str, **kw) -> dict:

@@ -593,6 +593,48 @@ def test_ship_apply_merges_into_owner_branch_after_approval(env):
     assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
+def test_ship_names_and_merges_the_commit_the_owner_approved(env):
+    """#1407: the ship prompt and plan name the integration COMMIT, and ship merges exactly that commit even when an
+    agent moves the integration branch while the approval waits."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = gitops.project_root(home, 1) / "integration"
+    sha = sh(integ, "git", "rev-parse", "HEAD").strip()
+    sh(repo, "git", "tag", gitops.integration_branch(1), "HEAD")       # a same-named tag never shadows the branch
+    plan = m.call("ship_plan", project="demo")
+    assert sha[:12] in plan["text"] and plan["commit"] == sha
+    assert not any(" merge " in c or " push" in c for c in plan["commands"])    # a raw git runs the shared config
+    import argparse
+    import shlex
+    from jarves.projectmgr import surfaces
+    argv = shlex.split(plan["commands"][0].split("   #")[0])
+    assert argv[0] == "jarvis"                      # the installed command (packaging/windows/jarvis.cmd)
+    cli = argparse.ArgumentParser()
+    surfaces.add_cli(cli.add_subparsers())
+    a = cli.parse_args(argv[1:])                    # the real parser of `jarvis project`
+    assert (a.action, a.project, a.apply, a.commit) == ("ship", "demo", True, sha)
+    seen = []
+
+    def approve_then_move(prompt, **_):
+        seen.append(prompt)
+        (integ / "late.txt").write_text("late\n")
+        sh(integ, "git", "add", "late.txt")
+        sh(integ, "git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "late")
+        return True
+
+    m._ask = approve_then_move
+    assert m.call("ship_plan", project="demo", apply=True, yes=True)["code"] == "NEED_COMMIT"
+    r = m.call("ship_plan", project="demo", apply=True, commit=sha)
+    assert r["ok"] and sha[:12] in seen[0] and sha[:12] in r["text"]
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+    moved = m.call("ship_plan", project="demo", apply=True, yes=True, commit=sha)   # the branch moved after the plan
+    assert moved["code"] == "MOVED" and moved["commit"] != sha and not (repo / "late.txt").exists()
+    assert m.call("ship_plan", project="demo", apply=True, yes=True, commit=sha[:6])["code"] == "MOVED"   # too short
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)
@@ -1290,6 +1332,17 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
 
 
+def test_github_status_text_names_the_git_prerequisite(env, monkeypatch):
+    """#1722 R6: `jarvis project github` prints the result text, so the git 2.31 message must be in it."""
+    from jarves.projectmgr import forge
+    m, repo, _ = env
+    open_project(m, repo)
+    monkeypatch.setattr(forge, "status", lambda path: {"git": False, "git_error": "JARVES needs git 2.31 or later "
+                                                       "(found: 2.30)", "gh": True, "signed_in": False, "repo": ""})
+    g = m.call("github", project="demo")
+    assert g["ok"] and "git 2.31 or later" in g["text"] and g["git"] is False and "remote" not in g["text"]
+
+
 def _rule_matches(rule: str, cmd: str) -> bool:
     """Tiny model of Claude Code Bash rules: `X:*` = prefix, `*` = glob, otherwise exact."""
     import fnmatch
@@ -1370,3 +1423,15 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
     assert branch not in t["waiting"]
     sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
+
+
+def test_ship_without_an_integration_commit_says_so(env):
+    """#1407: ship resolves the integration commit first; with no such branch it refuses instead of merging a name."""
+    m, repo, home = env
+    open_project(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    if integ.exists():
+        sh(repo, "git", "worktree", "remove", "--force", str(integ))
+    sh(repo, "git", "branch", "-D", gitops.integration_branch(1))
+    for apply in (False, True):
+        assert m.call("ship_plan", project="demo", apply=apply, yes=True)["code"] == "NO_INTEGRATION"
