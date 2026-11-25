@@ -1,8 +1,13 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09 (findings authored); re-checked 2026-11-23. Every `file:line` reference and every issue state below
-is as of that re-check against `origin/main` 25f0a54 (each line anchor re-read with `git show 25f0a54:<file>`); "at review time" describes only the old 2026-11-09 behaviour,
-never a line number.
+Date: 2026-11-09 (findings authored); re-checked 2026-11-23.
+**Pin: every `file:line` reference and every issue state below is as of `main` 25f0a54.** Each line anchor was
+re-read there with `git show 25f0a54:<file>`. Read the anchors at that commit, not at a newer main.
+Drift: by `main` fae76ae, `projectmgr/{gitops,forge,service,surfaces}.py` had changed (#1390, #1407, #1722), so
+anchors in those files may have moved; they were not re-mapped, and the findings were not re-checked against that code.
+The other cited files (`goal_plans`, `continuity`, `devstatus`, `preferences`, `mobile`, `projectmgr/{engine,runners}`)
+are byte-identical between 25f0a54 and fae76ae (`git diff --stat` empty), so their anchors still hold there.
+"At review time" means only the old 2026-11-09 behaviour. It never refers to a line number.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
