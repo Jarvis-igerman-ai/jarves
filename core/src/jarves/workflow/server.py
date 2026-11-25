@@ -73,8 +73,11 @@ _TIGHTENED: set[str] = set()
 
 
 def _tighten_once(path: Path) -> None:
-    """Fix an existing file once per process (idempotent)."""
-    key = str(path)
+    """Fix an existing file once per process (idempotent), keyed by its path.
+
+    The path is marked before icacls runs, so a failure is not retried in the same process: it is logged
+    by owner_only_file and retried on the next start (access.token and, since JAR-835, sessions.json)."""
+    key = os.path.abspath(path)  # one key for a relative and an absolute spelling (no I/O, never raises)
     if key not in _TIGHTENED:
         _TIGHTENED.add(key)
         owner_only_file(path)
@@ -125,8 +128,11 @@ def session_key(token: str, session: str) -> str:
 def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
     """Unexpired stored session digests; a missing or damaged file means no stored sessions."""
     now = time.time() if now is None else now
+    path = Path(home) / "sessions.json"
     try:
-        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
+        if path.is_file():  # JAR-260: a file from before #824 keeps the folder ACL; Server.__init__ loads at startup
+            _tighten_once(path)  # before the read, so an unreadable file is tightened too
+        raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw.get("sessions") if isinstance(raw, dict) else None
         if not isinstance(rows, dict):
             return {}

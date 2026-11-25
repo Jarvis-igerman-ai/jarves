@@ -1,6 +1,7 @@
 """#824: access.token / sessions.json get an owner-only ACL on Windows (icacls mocked; no real ACL changes)."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -58,3 +59,64 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     names = [p.name for p in seen]
     assert names.count("access.token") == 2  # created, then existing file tightened once
     assert any(n.startswith("sessions.") for n in names)  # the temp file, locked before it is written
+
+
+def test_existing_sessions_file_is_tightened_at_startup(monkeypatch, tmp_path):
+    """JAR-260 reopened: an upgraded install's sessions.json was only read, so it kept the folder ACL."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    assert server.load_sessions(tmp_path) == {}
+    server.load_sessions(tmp_path)
+    assert seen == [tmp_path / "sessions.json"]  # once per process, the real file (not a temp copy)
+
+
+def test_missing_sessions_file_is_not_tightened(monkeypatch, tmp_path):
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == []
+
+
+def test_failed_tighten_is_not_retried_until_next_start(monkeypatch, tmp_path):
+    """Review R2 (JAR-835): once per process per path; a failure waits for the next process start."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or False)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {}}', encoding="utf-8")
+    server.load_sessions(tmp_path)
+    server.load_sessions(tmp_path)
+    assert seen == [tmp_path / "sessions.json"]
+    monkeypatch.setattr(server, "_TIGHTENED", set())  # a new process
+    server.load_sessions(tmp_path)
+    assert seen == [tmp_path / "sessions.json"] * 2
+
+
+def test_unreadable_sessions_file_is_still_tightened(monkeypatch, tmp_path):
+    """Review R2 (JAR-835): a file that exists but cannot be read is tightened before the read fails."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
+
+    def locked(self, *a, **k):
+        raise PermissionError(13, "locked", str(self))
+    monkeypatch.setattr(Path, "read_text", locked)
+    assert server.load_sessions(tmp_path) == {}
+    assert seen == [tmp_path / "sessions.json"]
+
+
+def test_relative_and_absolute_path_share_one_key(monkeypatch, tmp_path):
+    """Review R1 (JAR-835): the same file through two spellings is tightened once per process."""
+    seen: list[Path] = []
+    monkeypatch.setattr(server, "owner_only_file", lambda p: seen.append(Path(p)) or True)
+    monkeypatch.setattr(server, "_TIGHTENED", set())
+    (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    server.load_sessions(Path("."))
+    # The absolute spelling comes from the OS (not tmp_path), so a short-name or symlinked temp folder
+    # cannot give a different string for the same folder (#1778 review R2).
+    server.load_sessions(Path(os.getcwd()))
+    assert len(seen) == 1
